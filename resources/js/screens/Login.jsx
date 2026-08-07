@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../lib/auth';
+import { BrandMark } from '../components/Shell';
 import { Button, Card, Field, Input } from '../components/ui';
 
 export default function Login() {
@@ -32,13 +33,13 @@ export default function Login() {
     return (
         <div className="flex min-h-screen items-center justify-center px-4">
             <div className="w-full max-w-sm">
-                <div className="mb-6 text-center">
-                    <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600 text-lg font-bold text-white">
-                        CT
-                    </span>
-                    <h1 className="text-2xl font-semibold tracking-tight">CafeTrack</h1>
-                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                        Sign in to run the floor.
+                <div className="mb-7 text-center">
+                    <div className="mx-auto mb-4 w-fit">
+                        <BrandMark size="lg" />
+                    </div>
+                    <h1 className="ct-brand text-3xl font-bold tracking-tight">CAFETRACK</h1>
+                    <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+                        Press start to run the floor
                     </p>
                 </div>
 
@@ -72,7 +73,7 @@ export default function Login() {
                             </p>
                         )}
 
-                        <Button type="submit" busy={busy} className="w-full">
+                        <Button type="submit" size="lg" busy={busy} className="w-full">
                             Sign in
                         </Button>
                     </form>

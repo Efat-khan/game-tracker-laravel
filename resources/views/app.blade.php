@@ -3,21 +3,24 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#060a14">
     <title>CafeTrack</title>
 
-    {{-- Light is the default. Applied before first paint so a dark-mode user
-         never sees a white flash on load. --}}
+    {{-- Dark is the default. Applied before first paint so nobody gets a white
+         flash on the way into a dim room. --}}
     <script>
         try {
-            if (localStorage.getItem('cafetrack.theme') === 'dark') {
+            if (localStorage.getItem('cafetrack.theme') !== 'light') {
                 document.documentElement.classList.add('dark');
             }
-        } catch (e) {}
+        } catch (e) {
+            document.documentElement.classList.add('dark');
+        }
     </script>
 
     @vite(['resources/css/app.css', 'resources/js/app.jsx'])
 </head>
-<body class="bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 antialiased">
+<body class="bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100">
     <div id="cafetrack"></div>
 </body>
 </html>

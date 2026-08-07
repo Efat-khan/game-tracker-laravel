@@ -3,13 +3,16 @@ import { useEffect, useState } from 'react';
 /* ------------------------------------------------------------------ button */
 
 const VARIANTS = {
+    // The lit primary is the one call to action on a screen; everything else
+    // stays quiet so it keeps its weight.
     primary:
-        'bg-indigo-600 text-white hover:bg-indigo-500 focus-visible:outline-indigo-600 disabled:bg-indigo-400',
+        'bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-indigo-400 shadow-[0_0_20px_-6px_var(--color-indigo-500)]',
     subtle: 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
     outline:
-        'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800',
+        'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-800',
     danger: 'bg-rose-600 text-white hover:bg-rose-500 disabled:bg-rose-400',
-    success: 'bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-emerald-400',
+    success:
+        'bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-emerald-400 shadow-[0_0_20px_-6px_var(--color-emerald-500)]',
     ghost: 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
 };
 
@@ -23,7 +26,8 @@ export function Button({ variant = 'primary', size = 'md', className = '', busy,
     return (
         <button
             className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition
-                        disabled:cursor-not-allowed disabled:opacity-60 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+                        active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60
+                        ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
             disabled={busy || rest.disabled}
             {...rest}
         >
@@ -56,7 +60,7 @@ export function PageHeader({ title, subtitle, children }) {
     return (
         <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
             <div>
-                <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+                <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
                 {subtitle && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
             </div>
             {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
@@ -66,16 +70,18 @@ export function PageHeader({ title, subtitle, children }) {
 
 export function Pill({ tone = 'slate', children, className = '', ...rest }) {
     const tones = {
-        slate: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
-        green: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300',
-        amber: 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300',
-        red: 'bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-300',
-        indigo: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300',
+        slate: 'bg-slate-100 text-slate-700 ring-slate-300/60 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700',
+        green: 'bg-emerald-100 text-emerald-800 ring-emerald-400/40 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-500/30',
+        amber: 'bg-amber-100 text-amber-800 ring-amber-400/40 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30',
+        red: 'bg-rose-100 text-rose-800 ring-rose-400/40 dark:bg-rose-500/15 dark:text-rose-300 dark:ring-rose-500/30',
+        indigo: 'bg-indigo-100 text-indigo-800 ring-indigo-400/40 dark:bg-indigo-500/15 dark:text-indigo-200 dark:ring-indigo-500/30',
+        live: 'bg-live-500/15 text-live-600 ring-live-500/40 dark:text-live-400',
     };
 
     return (
         <span
-            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${tones[tone]} ${className}`}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold
+                        uppercase tracking-[0.06em] ring-1 ring-inset ${tones[tone]} ${className}`}
             {...rest}
         >
             {children}
@@ -87,7 +93,7 @@ export function Table({ head, children, empty, colSpan = 1 }) {
     return (
         <div className="overflow-x-auto">
             <table className="w-full min-w-full border-collapse">
-                <thead className="border-b border-slate-200 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-800/40">
+                <thead className="border-b border-slate-200 bg-slate-50/80 dark:border-slate-800 dark:bg-slate-950/40">
                     <tr>{head}</tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -274,11 +280,13 @@ export function Stat({ label, value, tone = 'default', hint }) {
     };
 
     return (
-        <Card className="p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        <Card className="overflow-hidden p-4">
+            {/* A lit top edge, so a row of tiles reads as instrumentation. */}
+            <span className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent" />
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
                 {label}
             </p>
-            <p className={`mt-1.5 text-2xl font-semibold tabular-nums ${tones[tone]}`}>{value}</p>
+            <p className={`mt-1.5 text-2xl font-bold tabular-nums ${tones[tone]}`}>{value}</p>
             {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
         </Card>
     );

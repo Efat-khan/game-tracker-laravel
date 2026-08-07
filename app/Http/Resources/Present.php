@@ -220,8 +220,12 @@ final class Present
         ], $totals === [] ? [] : ['totals' => $totals]);
     }
 
-    public static function cafe(Cafe $cafe, ?int $stationCount = null, ?int $accountCount = null): array
-    {
+    public static function cafe(
+        Cafe $cafe,
+        ?int $stationCount = null,
+        ?int $accountCount = null,
+        ?array $features = null,
+    ): array {
         return [
             'id' => $cafe->id,
             'name' => $cafe->name,
@@ -230,6 +234,8 @@ final class Present
             'is_active' => (bool) $cafe->is_active,
             'station_count' => $stationCount,
             'account_count' => $accountCount,
+            // Only sent to the platform owner, whose screen has the switches.
+            'features' => $features,
             'created_at' => self::time($cafe->created_at),
         ];
     }

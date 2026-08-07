@@ -7,6 +7,7 @@ use App\Http\Controllers\BookingController;
 use App\Http\Controllers\CafeController;
 use App\Http\Controllers\CheckinController;
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\FeatureController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\PackageController;
 use App\Http\Controllers\ProductController;
@@ -53,6 +54,8 @@ Route::middleware('auth:cafetrack')->group(function () {
     Route::middleware('superadmin')->group(function () {
         Route::post('/cafes', [CafeController::class, 'store']);
         Route::patch('/cafes/{id}', [CafeController::class, 'update'])->whereNumber('id');
+        // The grant itself. Superadmin only, by design.
+        Route::patch('/cafes/{id}/features', [FeatureController::class, 'update'])->whereNumber('id');
     });
 });
 
@@ -63,6 +66,9 @@ Route::middleware('auth:cafetrack')->group(function () {
 */
 
 Route::middleware(['auth:cafetrack', 'cafe'])->group(function () {
+
+    // Which optional modules this cafe may use — the sidebar reads this.
+    Route::get('/features', [FeatureController::class, 'index']);
 
     /* ---- Stations ---------------------------------------------------- */
     Route::get('/stations', [StationController::class, 'index']);
@@ -85,21 +91,23 @@ Route::middleware(['auth:cafetrack', 'cafe'])->group(function () {
     Route::post('/invoices/{id}/pay-wallet', [InvoiceController::class, 'payWallet'])->whereNumber('id');
 
     /* ---- Catalogue, customers, wallet -------------------------------- */
-    Route::get('/products', [ProductController::class, 'index']);
-    Route::get('/packages', [PackageController::class, 'index']);
-    Route::get('/tiers', [TierController::class, 'index']);
+    Route::get('/products', [ProductController::class, 'index'])->middleware('feature:products');
+    Route::get('/packages', [PackageController::class, 'index'])->middleware('feature:loyalty');
+    Route::get('/tiers', [TierController::class, 'index'])->middleware('feature:loyalty');
 
     Route::get('/customers', [CustomerController::class, 'index']);
     Route::get('/customers/{id}', [CustomerController::class, 'show'])->whereNumber('id');
     Route::get('/customers/{id}/wallet', [CustomerController::class, 'wallet'])->whereNumber('id');
     Route::post('/customers/{id}/topup', [CustomerController::class, 'topup'])->whereNumber('id');
 
-    /* ---- Bookings ---------------------------------------------------- */
-    Route::get('/bookings', [BookingController::class, 'index']);
-    Route::post('/bookings', [BookingController::class, 'store']);
-    Route::patch('/bookings/{id}', [BookingController::class, 'update'])->whereNumber('id');
-    Route::post('/bookings/{id}/start', [BookingController::class, 'start'])->whereNumber('id');
-    Route::post('/bookings/{id}/cancel', [BookingController::class, 'cancel'])->whereNumber('id');
+    /* ---- Bookings (optional module) ----------------------------------- */
+    Route::middleware('feature:bookings')->group(function () {
+        Route::get('/bookings', [BookingController::class, 'index']);
+        Route::post('/bookings', [BookingController::class, 'store']);
+        Route::patch('/bookings/{id}', [BookingController::class, 'update'])->whereNumber('id');
+        Route::post('/bookings/{id}/start', [BookingController::class, 'start'])->whereNumber('id');
+        Route::post('/bookings/{id}/cancel', [BookingController::class, 'cancel'])->whereNumber('id');
+    });
 
     /* ---- Shifts ------------------------------------------------------ */
     Route::get('/shifts/current', [ShiftController::class, 'current']);
@@ -133,17 +141,21 @@ Route::middleware(['auth:cafetrack', 'cafe'])->group(function () {
         Route::post('/invoices/{id}/discount', [InvoiceController::class, 'discount'])->whereNumber('id');
         Route::post('/invoices/{id}/void', [InvoiceController::class, 'void'])->whereNumber('id');
 
-        Route::post('/products', [ProductController::class, 'store']);
-        Route::patch('/products/{id}', [ProductController::class, 'update'])->whereNumber('id');
-        Route::delete('/products/{id}', [ProductController::class, 'destroy'])->whereNumber('id');
+        Route::middleware('feature:products')->group(function () {
+            Route::post('/products', [ProductController::class, 'store']);
+            Route::patch('/products/{id}', [ProductController::class, 'update'])->whereNumber('id');
+            Route::delete('/products/{id}', [ProductController::class, 'destroy'])->whereNumber('id');
+        });
 
-        Route::post('/packages', [PackageController::class, 'store']);
-        Route::patch('/packages/{id}', [PackageController::class, 'update'])->whereNumber('id');
-        Route::delete('/packages/{id}', [PackageController::class, 'destroy'])->whereNumber('id');
+        Route::middleware('feature:loyalty')->group(function () {
+            Route::post('/packages', [PackageController::class, 'store']);
+            Route::patch('/packages/{id}', [PackageController::class, 'update'])->whereNumber('id');
+            Route::delete('/packages/{id}', [PackageController::class, 'destroy'])->whereNumber('id');
 
-        Route::post('/tiers', [TierController::class, 'store']);
-        Route::patch('/tiers/{id}', [TierController::class, 'update'])->whereNumber('id');
-        Route::delete('/tiers/{id}', [TierController::class, 'destroy'])->whereNumber('id');
+            Route::post('/tiers', [TierController::class, 'store']);
+            Route::patch('/tiers/{id}', [TierController::class, 'update'])->whereNumber('id');
+            Route::delete('/tiers/{id}', [TierController::class, 'destroy'])->whereNumber('id');
+        });
 
         Route::post('/customers/{id}/adjust', [CustomerController::class, 'adjust'])->whereNumber('id');
 

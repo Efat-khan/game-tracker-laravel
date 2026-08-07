@@ -107,6 +107,7 @@ export function useNow(intervalMs = 1000) {
     return now;
 }
 
+/** Dark is the default; the choice is remembered in the browser. */
 export function useTheme() {
     const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'));
 

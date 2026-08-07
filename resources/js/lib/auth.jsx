@@ -23,9 +23,13 @@ function writeSession(session) {
     }
 }
 
+/** Everything optional is assumed ON until the server says otherwise. */
+const ALL_ON = { products: true, loyalty: true, bookings: true };
+
 export function AuthProvider({ children }) {
     const [session, setSession] = useState(() => (getToken() ? readSession() : null));
     const [cafe, setCafe] = useState(() => getActiveCafe());
+    const [features, setFeatures] = useState(ALL_ON);
 
     const signOut = useCallback(() => {
         setToken(null);
@@ -40,6 +44,38 @@ export function AuthProvider({ children }) {
     useEffect(() => {
         setUnauthorizedHandler(signOut);
     }, [signOut]);
+
+    /*
+     * Which optional modules this cafe was granted. Re-fetched whenever the
+     * cafe changes, because a superadmin stepping into a different tenant is
+     * looking at a different grant.
+     *
+     * A failure leaves everything ON. The server refuses disabled routes on
+     * its own, so the worst case is a nav item that answers 403 — far better
+     * than hiding half the app because one request blipped.
+     */
+    useEffect(() => {
+        if (!session) {
+            setFeatures(ALL_ON);
+            return;
+        }
+
+        // A superadmin who has not picked a cafe has nothing to scope to.
+        if (session.role === 'superadmin' && !cafe) {
+            setFeatures(ALL_ON);
+            return;
+        }
+
+        let cancelled = false;
+
+        api.features()
+            .then((result) => !cancelled && setFeatures({ ...ALL_ON, ...result }))
+            .catch(() => !cancelled && setFeatures(ALL_ON));
+
+        return () => {
+            cancelled = true;
+        };
+    }, [session, cafe]);
 
     const signIn = useCallback(async (email, password) => {
         const result = await api.login(email, password);
@@ -80,6 +116,9 @@ export function AuthProvider({ children }) {
             signOut,
             cafe,
             workInCafe,
+            features,
+            /** Core screens pass no feature name and are always allowed. */
+            can: (feature) => !feature || features[feature] !== false,
             isSuperadmin,
             // A superadmin passes every admin check once they have selected a
             // cafe, so the admin-only screens appear for them too.
@@ -89,7 +128,7 @@ export function AuthProvider({ children }) {
             // A superadmin who has not picked a cafe cannot use scoped screens.
             needsCafe: isSuperadmin && !cafe,
         };
-    }, [session, cafe, signIn, signOut, workInCafe]);
+    }, [session, cafe, features, signIn, signOut, workInCafe]);
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

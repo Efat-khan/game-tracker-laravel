@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, getToken } from '../lib/api';
 import { useAsync, useNow, usePolling } from '../lib/hooks';
 import { duration, money, parseUtc } from '../lib/format';
+import { BrandMark } from '../components/Shell';
 import { Button, Card, Field, Input, Loading, Spinner } from '../components/ui';
 
 /**
@@ -43,12 +44,12 @@ export default function Checkin({ stationId }) {
 
     return (
         <Frame>
-            <div className="mb-5 text-center">
-                <span className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-base font-bold text-white">
-                    CT
-                </span>
-                <h1 className="text-xl font-semibold tracking-tight">{station.name}</h1>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <div className="mb-6 text-center">
+                <div className="mx-auto mb-4 w-fit">
+                    <BrandMark />
+                </div>
+                <h1 className="text-2xl font-bold tracking-tight">{station.name}</h1>
+                <p className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
                     {station.type} · {money(station.hourly_rate)}/hr
                 </p>
             </div>
@@ -70,7 +71,7 @@ export default function Checkin({ stationId }) {
 
 function Frame({ children }) {
     return (
-        <div className="flex min-h-screen justify-center bg-slate-50 px-4 py-8 dark:bg-slate-950">
+        <div className="flex min-h-screen justify-center px-4 py-10">
             <div className="w-full max-w-sm">{children}</div>
         </div>
     );
@@ -91,7 +92,8 @@ function InPlay({ session, now }) {
 
     return (
         <Card className="p-6 text-center">
-            <p className="text-xs font-medium uppercase tracking-wide text-indigo-600 dark:text-indigo-400">
+            <p className="flex items-center justify-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-live-600 dark:text-live-400">
+                <span className="ct-live-dot h-2 w-2 rounded-full bg-live-500" aria-hidden="true" />
                 In play
             </p>
             <p className="mt-2 text-lg font-semibold">{session.customer_name}</p>
@@ -99,11 +101,13 @@ function InPlay({ session, now }) {
             <div className="mt-6 grid grid-cols-2 gap-4">
                 <div>
                     <p className="text-xs text-slate-500">Time played</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">{duration(elapsed)}</p>
+                    <p className="mt-1 text-3xl font-bold tabular-nums text-live-600 dark:text-live-400">
+                        {duration(elapsed)}
+                    </p>
                 </div>
                 <div>
                     <p className="text-xs text-slate-500">Cost so far</p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums">{money(session.running_cost)}</p>
+                    <p className="mt-1 text-3xl font-bold tabular-nums">{money(session.running_cost)}</p>
                 </div>
             </div>
 
@@ -199,8 +203,8 @@ function StartForm({ station, qrToken, onStarted }) {
                             </button>
                         ))}
                     </div>
-                    <p className="mt-2 text-sm font-medium text-indigo-600 dark:text-indigo-400">
-                        {money(effective)} per hour
+                    <p className="mt-3 text-center text-lg font-bold tabular-nums text-indigo-600 dark:text-indigo-300">
+                        {money(effective)} <span className="text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">per hour</span>
                     </p>
                 </Field>
 

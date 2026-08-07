@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureAdmin;
+use App\Http\Middleware\EnsureFeature;
 use App\Http\Middleware\EnsureSuperadmin;
 use App\Http\Middleware\OptionalAuth;
 use App\Http\Middleware\ResetRequestState;
@@ -28,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'cafe' => ResolveCafeContext::class,
             'admin' => EnsureAdmin::class,
+            'feature' => EnsureFeature::class,
             'superadmin' => EnsureSuperadmin::class,
             'optional.auth' => OptionalAuth::class,
         ]);

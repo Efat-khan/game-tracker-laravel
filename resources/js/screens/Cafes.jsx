@@ -82,6 +82,14 @@ export default function Cafes() {
 
                             <p className="mt-3 text-xs text-slate-500">Opened {dateTime(row.created_at)}</p>
 
+                            {isSuperadmin && row.features && (
+                                <FeatureSwitches
+                                    cafe={row}
+                                    onChanged={reload}
+                                    onError={setActionError}
+                                />
+                            )}
+
                             {isSuperadmin && (
                                 <div className="mt-4 flex flex-wrap gap-2">
                                     <Button
@@ -111,12 +119,77 @@ export default function Cafes() {
 
             {isSuperadmin && (
                 <p className="mt-4 text-xs text-slate-500">
-                    Suspending a cafe stops everyone in it signing in. Its data is untouched.
+                    Suspending a cafe stops everyone in it signing in — its data is untouched. Switching a module
+                    off hides it from that cafe's sidebar and refuses its routes; existing records are kept, so
+                    turning it back on restores everything.
                 </p>
             )}
 
             <NewCafeModal open={creating} onClose={() => setCreating(false)} onDone={reload} />
         </>
+    );
+}
+
+/**
+ * The owner's grant: which optional modules this cafe gets.
+ *
+ * Only rendered for a superadmin, and only because the API sends `features`
+ * to them alone — a cafe admin cannot see or change their own grant, or they
+ * would simply switch on whatever they had not been given.
+ */
+function FeatureSwitches({ cafe, onChanged, onError }) {
+    const [busy, setBusy] = useState(null);
+
+    async function toggle(feature, enabled) {
+        setBusy(feature.key);
+
+        try {
+            await api.setCafeFeatures(cafe.id, { [feature.key]: enabled });
+            onChanged();
+        } catch (err) {
+            onError(err);
+        } finally {
+            setBusy(null);
+        }
+    }
+
+    return (
+        <div className="mt-4 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                Modules
+            </p>
+
+            <ul className="space-y-1.5">
+                {cafe.features.map((feature) => (
+                    <li key={feature.key} className="flex items-start justify-between gap-3">
+                        <span className="min-w-0">
+                            <span className="block text-sm font-medium">{feature.label}</span>
+                            <span className="block text-xs text-slate-500">{feature.blurb}</span>
+                        </span>
+
+                        <button
+                            type="button"
+                            role="switch"
+                            aria-checked={feature.enabled}
+                            aria-label={`${feature.label} for ${cafe.name}`}
+                            disabled={busy === feature.key}
+                            onClick={() => toggle(feature, !feature.enabled)}
+                            className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition disabled:opacity-50 ${
+                                feature.enabled
+                                    ? 'bg-indigo-600 shadow-[0_0_14px_-4px_var(--color-indigo-500)]'
+                                    : 'bg-slate-300 dark:bg-slate-700'
+                            }`}
+                        >
+                            <span
+                                className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
+                                    feature.enabled ? 'left-[1.125rem]' : 'left-0.5'
+                                }`}
+                            />
+                        </button>
+                    </li>
+                ))}
+            </ul>
+        </div>
     );
 }
 

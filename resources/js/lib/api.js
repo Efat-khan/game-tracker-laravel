@@ -144,6 +144,12 @@ export const api = {
     createCafe: (body) => post('/cafes', body),
     updateCafe: (id, body) => patch(`/cafes/${id}`, body),
 
+    /* ---- optional modules ---------------------------------------------- */
+    // What this cafe may use. The sidebar reads it.
+    features: () => get('/features'),
+    // The grant. Superadmin only — the server enforces that, not this file.
+    setCafeFeatures: (id, body) => patch(`/cafes/${id}/features`, body),
+
     /* ---- stations ----------------------------------------------------- */
     stations: () => get('/stations'),
     createStation: (body) => post('/stations', body),

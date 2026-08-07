@@ -8,28 +8,30 @@ import { useEffect, useState } from 'react';
  * sequential encoding: a single hue, light to dark, where the lightest step means
  * "nobody was playing".
  *
- * Validated against the real card surfaces (#ffffff light, slate-900 dark):
+ * Validated against the real card surfaces (#ffffff light, #0b1120 dark):
  * lightness band, chroma floor and 3:1 contrast all pass in both modes.
  */
 export const CHART = {
     light: {
         series: '#2a78d6',
-        grid: '#e2e8f0',
-        axis: '#64748b',
+        grid: '#dbe1f2',
+        axis: '#6d7da8',
         surface: '#ffffff',
         text: '#0f172a',
         // Sequential blue, 100 → 700. Lightest = near zero.
         ramp: ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#2a78d6', '#256abf', '#184f95', '#0d366b'],
-        empty: '#f1f5f9',
+        empty: '#eceffa',
     },
     dark: {
         series: '#3987e5',
-        grid: '#1e293b',
-        axis: '#94a3b8',
-        surface: '#0f172a',
-        text: '#f1f5f9',
+        grid: '#151f3a',
+        axis: '#8e9cc4',
+        // The card surface: slate-900 at 70% over slate-950. The series is
+        // re-validated against this, not against a generic dark grey.
+        surface: '#0b1120',
+        text: '#eceffa',
         ramp: ['#0d366b', '#104281', '#184f95', '#256abf', '#2a78d6', '#3987e5', '#5598e7', '#86b6ef'],
-        empty: '#1e293b',
+        empty: '#151f3a',
     },
 };
 

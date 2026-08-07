@@ -19,21 +19,22 @@ All money is Bangladeshi Taka (৳).
 The backend was built first as option (A) API-only, on the specification's
 assurance that an existing Next.js frontend would consume it unchanged. That
 frontend is not in this repository and was never available, so the app had no
-usable interface — all 69 routes and no way for staff to reach them. The UI
+usable interface — all 71 routes and no way for staff to reach them. The UI
 here closes that gap.
 
 It is option (B)-shaped — everything under one Laravel roof, React rendering
 the screens — but without Inertia. Inertia wants page props from Laravel
-controllers, which would mean rebuilding the query logic behind all 69 routes a
+controllers, which would mean rebuilding the query logic behind all 71 routes a
 second time. The SPA instead calls the same API any other client would, so the
 tested backend is reused whole and a Next.js app can still be swapped back in
 later. Option (C) Blade + Livewire would have meant the same duplication with
 every screen rewritten server-side.
 
 **Fifteen screens**: the fourteen admin screens behind a fixed sidebar, plus
-the public check-in page a player opens by scanning a booth's QR sticker. Light
-theme by default with a dark toggle remembered in the browser, and the guided
-tour.
+the public check-in page a player opens by scanning a booth's QR sticker.
+**Dark by default** — a gaming cafe runs its screens in a dim room and the
+product should look like it belongs on the same counter as the consoles — with
+a light toggle remembered in the browser, and the guided tour.
 
 **Auth: JWT** (HS256, via `firebase/php-jwt`) rather than Sanctum. Option (A)
 is what makes this the right call: the token claims are identical to the
@@ -113,13 +114,46 @@ currently carries open advisories — none of which apply to a client-only SPA,
 but all of which surface in `npm audit` — so a ~50-line History API router
 stands in. `npm audit` reports **0 vulnerabilities**.
 
+### Optional modules
+
+The platform owner decides which optional modules a cafe gets. Each cafe card
+on the **Cafes** screen carries a switch per module:
+
+| Module | Covers |
+| --- | --- |
+| **Products** | Selling snacks and drinks, and adding them to a bill. |
+| **Loyalty** | Top-up packages and membership tiers. |
+| **Bookings** | Reserving a station for a future slot. |
+
+Everything else is core and always on — a cafe without stations, sessions,
+invoices or a cash drawer is not a cafe.
+
+Three things worth knowing about how this is enforced:
+
+- **Hiding the sidebar item is not the guard.** `EnsureFeature` middleware sits
+  on the routes and answers **403**, so a disabled module cannot be reached by
+  calling the API directly. The nav is only the presentation half.
+- **A cafe's own admin cannot grant themselves a module.** The switch is
+  superadmin-only, and the grant lives in its own `cafe_features` table rather
+  than in `app_settings`, which a cafe admin can write to. Otherwise an admin
+  would simply switch on whatever they had not been given.
+- **An absent row means enabled.** Existing cafes keep everything they already
+  had, and the owner turns things *off* rather than having to grant each module
+  to every cafe. Turning one back on restores it — nothing is deleted when a
+  module is switched off.
+
+It answers 403 rather than the 404 the tenancy rules use. Those exist so a
+lookup cannot confirm that *another tenant's* record exists; here the caller is
+asking about their own cafe, and "your plan does not include this" is the
+honest, actionable answer.
+
 ### Tests
 
 ```bash
 php artisan test
 ```
 
-**191 feature tests, all green.** They hit real HTTP routes, each against a
+**207 feature tests, all green.** They hit real HTTP routes, each against a
 fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
 without a MySQL server). The migrations are written to compile identically on
 both; the MySQL DDL is what the schema section below describes.
@@ -136,6 +170,7 @@ both; the MySQL DDL is what the schema section below describes.
 | Shifts | 15 |
 | POS | 15 |
 | Wallet & loyalty | 14 |
+| Optional modules | 16 |
 | Auth | 3 |
 
 ---
@@ -404,7 +439,7 @@ Both dependency audits are clean: `composer audit` and `npm audit` each report
 no advisories. `firebase/php-jwt` is on `^7.1` for that reason — everything
 below 7.0 carries CVE-2025-45769.
 
-The backend test count is **191** rather than the reference's 109 — the same
+The backend test count is **207** rather than the reference's 109 — the same
 groups, covered a little more thickly, plus a group for cafe onboarding and
 catalogue lifecycle that the reference folds into its other suites.
 

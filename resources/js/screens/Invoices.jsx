@@ -18,13 +18,19 @@ import {
 } from '../components/ui';
 
 export default function Invoices() {
-    const { isAdmin } = useAuth();
+    const { isAdmin, can } = useAuth();
+    // Skip the catalogue fetch entirely when the owner has not granted this
+    // cafe the Products module — otherwise every visit 403s in the console.
+    const hasProducts = can('products');
     const [filters, setFilters] = useState({ payment_status: '', date_from: '', date_to: '' });
     const [expanded, setExpanded] = useState(null);
     const [busyId, setBusyId] = useState(null);
     const [actionError, setActionError] = useState(null);
 
-    const products = useAsync(() => api.products({ active_only: true }), []);
+    const products = useAsync(
+        () => (hasProducts ? api.products({ active_only: true }) : Promise.resolve([])),
+        [hasProducts],
+    );
     const { data, error, loading, reload } = useAsync(
         () => api.invoices({ ...filters, limit: 200 }),
         [filters.payment_status, filters.date_from, filters.date_to],

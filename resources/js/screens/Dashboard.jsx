@@ -86,14 +86,15 @@ function StationCard({ row, now, onStart, onEnd, onMaintenance }) {
     const elapsed = started ? Math.max(0, Math.floor((now - started.getTime()) / 60000)) : row.elapsed_minutes;
     const overdue = row.planned_minutes != null && elapsed > row.planned_minutes;
 
+    // A running station should be the thing your eye lands on across the room.
     const tone = maintenance
-        ? 'border-amber-300 dark:border-amber-500/40'
+        ? 'border-amber-400/60 dark:border-amber-500/40'
         : free
           ? 'border-slate-200 dark:border-slate-800'
-          : 'border-indigo-300 dark:border-indigo-500/40';
+          : 'border-live-500/50 ct-live-ring';
 
     return (
-        <Card className={`relative overflow-hidden border ${tone}`}>
+        <Card className={`relative overflow-hidden border transition ${tone}`}>
             {/* Clicking anywhere on a free card opens the same start form. */}
             {free && (
                 <button
@@ -106,8 +107,13 @@ function StationCard({ row, now, onStart, onEnd, onMaintenance }) {
             <div className="pointer-events-none relative z-10 p-4">
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                        <p className="truncate font-semibold">{row.station_name}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                        <p className="flex items-center gap-2 truncate font-semibold">
+                            {!free && !maintenance && (
+                                <span className="ct-live-dot h-2 w-2 shrink-0 rounded-full bg-live-500" aria-hidden="true" />
+                            )}
+                            {row.station_name}
+                        </p>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-400">
                             {row.station_type} · {money(row.hourly_rate)}/hr
                         </p>
                     </div>
@@ -156,12 +162,18 @@ function StationCard({ row, now, onStart, onEnd, onMaintenance }) {
                         <p className="truncate text-sm font-medium">{row.customer_name}</p>
                         <div className="mt-3 flex items-end justify-between">
                             <div>
-                                <p className="text-xs text-slate-500">Elapsed</p>
-                                <p className="text-lg font-semibold tabular-nums">{duration(elapsed)}</p>
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                                    Elapsed
+                                </p>
+                                <p className="text-xl font-bold tabular-nums text-live-600 dark:text-live-400">
+                                    {duration(elapsed)}
+                                </p>
                             </div>
                             <div className="text-right">
-                                <p className="text-xs text-slate-500">Cost so far</p>
-                                <p className="text-lg font-semibold tabular-nums">{money(row.running_cost)}</p>
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                                    Cost so far
+                                </p>
+                                <p className="text-xl font-bold tabular-nums">{money(row.running_cost)}</p>
                             </div>
                         </div>
                         <p className="mt-2 text-xs text-slate-500">

@@ -7,6 +7,7 @@ use App\Http\Resources\Present;
 use App\Models\AdminUser;
 use App\Models\Cafe;
 use App\Models\Station;
+use App\Services\FeatureService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -36,10 +37,13 @@ class CafeController extends Controller
         $accountCounts = AdminUser::whereNotNull('cafe_id')
             ->selectRaw('cafe_id, COUNT(*) as c')->groupBy('cafe_id')->pluck('c', 'cafe_id');
 
+        $features = app(FeatureService::class);
+
         return response()->json($cafes->map(fn (Cafe $cafe) => Present::cafe(
             $cafe,
             (int) ($stationCounts[$cafe->id] ?? 0),
             (int) ($accountCounts[$cafe->id] ?? 0),
+            $features->describe($cafe->id),
         ))->all());
     }
 
