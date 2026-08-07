@@ -121,29 +121,36 @@ class InvoiceController extends Controller
         $status = $request->input('payment_status');
         $method = $request->input('payment_method');
 
+        $alreadyPaid = $invoice->payment_status === 'paid';
+        $isSettling = $status === 'paid' && ! $alreadyPaid;
+
         if (! $isAdmin) {
-            if ($method !== null && $method !== $invoice->payment_method) {
+            // Staff MAY settle an unpaid invoice, and choosing cash or phone is
+            // part of settling it. What they may not do is re-open the question
+            // afterwards: changing the method on an already-paid invoice, or
+            // reverting it to unpaid (§3).
+            if ($method !== null && ! $isSettling && $method !== $invoice->payment_method) {
                 return response()->json([
                     'message' => 'Only an admin can change the payment method.',
                 ], 403);
             }
 
-            if ($status === 'unpaid' && $invoice->payment_status === 'paid') {
+            if ($status === 'unpaid' && $alreadyPaid) {
                 return response()->json([
                     'message' => 'Only an admin can revert a paid invoice to unpaid.',
                 ], 403);
             }
         }
 
-        if ($status === 'paid' && $invoice->payment_status !== 'paid') {
+        if ($isSettling) {
             $this->invoices->markPaid($invoice, $method ?? $invoice->payment_method ?? 'cash');
-        } elseif ($status === 'unpaid' && $invoice->payment_status === 'paid') {
+        } elseif ($status === 'unpaid' && $alreadyPaid) {
             $this->invoices->markUnpaid($invoice);
-        }
-
-        if ($method !== null && $isAdmin && $method !== $invoice->payment_method) {
+        } elseif ($method !== null && $method !== $invoice->payment_method) {
             $invoice->payment_method = $method;
             $invoice->save();
+
+            $this->invoices->logPaymentMethodChange($invoice);
         }
 
         return response()->json(Present::invoice($invoice->fresh(['items', 'session.station', 'session.customer'])));

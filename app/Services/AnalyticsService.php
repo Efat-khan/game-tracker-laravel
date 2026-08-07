@@ -25,12 +25,18 @@ class AnalyticsService
         return CarbonImmutable::now()->subDays($days - 1)->startOfDay();
     }
 
-    /** Non-void invoices only, at any payment status. */
+    /**
+     * Non-void invoices only, at any payment status.
+     *
+     * Every column is table-qualified: several of these queries join `sessions`,
+     * which carries its own cafe_id, status and created_at, and an unqualified
+     * name would be ambiguous.
+     */
     private function invoices(int $cafeId, int $days)
     {
-        return Invoice::where('cafe_id', $cafeId)
-            ->where('status', '!=', 'void')
-            ->where('created_at', '>=', $this->since($days));
+        return Invoice::where('invoices.cafe_id', $cafeId)
+            ->where('invoices.status', '!=', 'void')
+            ->where('invoices.created_at', '>=', $this->since($days));
     }
 
     private function dec(mixed $value): BigDecimal
@@ -42,7 +48,7 @@ class AnalyticsService
     public function dailyIncome(int $cafeId, int $days): array
     {
         $rows = $this->invoices($cafeId, $days)
-            ->selectRaw('DATE(created_at) as d, SUM(total_amount) as income, SUM(duration_minutes) as minutes, COUNT(*) as sessions')
+            ->selectRaw('DATE(invoices.created_at) as d, SUM(invoices.total_amount) as income, SUM(invoices.duration_minutes) as minutes, COUNT(*) as sessions')
             ->groupBy('d')
             ->get()
             ->keyBy('d');
@@ -238,7 +244,7 @@ class AnalyticsService
     public function profit(int $cafeId, int $days): array
     {
         $totals = $this->invoices($cafeId, $days)
-            ->selectRaw('SUM(session_amount) as play, SUM(items_amount) as items, SUM(discount_amount) as discounts, SUM(total_amount) as total')
+            ->selectRaw('SUM(invoices.session_amount) as play, SUM(invoices.items_amount) as items, SUM(invoices.discount_amount) as discounts, SUM(invoices.total_amount) as total')
             ->first();
 
         $play = $this->dec($totals->play ?? 0);

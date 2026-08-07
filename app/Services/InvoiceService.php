@@ -146,6 +146,16 @@ class InvoiceService
         return $invoice;
     }
 
+    public function logPaymentMethodChange(Invoice $invoice): void
+    {
+        $this->audit->log(
+            'invoice_payment_method',
+            'invoice',
+            $invoice->id,
+            sprintf('Invoice #%d payment method set to %s', $invoice->id, $invoice->payment_method),
+        );
+    }
+
     /** Admin only — staff cannot revert a paid invoice (§3). */
     public function markUnpaid(Invoice $invoice): Invoice
     {

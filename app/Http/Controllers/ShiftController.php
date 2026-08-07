@@ -38,7 +38,10 @@ class ShiftController extends Controller
         $shift = $this->shifts->current($this->context->id());
 
         if ($shift === null) {
-            return response()->json(null);
+            // A literal JSON null. response()->json(null) would emit {}, because
+            // Symfony swaps a null payload for an empty object, and the client
+            // needs to tell "no shift open" from "a shift with no fields".
+            return new JsonResponse('null', 200, [], 0, json: true);
         }
 
         return response()->json($this->withTotals($shift));
