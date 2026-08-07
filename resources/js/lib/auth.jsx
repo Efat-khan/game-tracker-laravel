@@ -30,6 +30,9 @@ export function AuthProvider({ children }) {
     const [session, setSession] = useState(() => (getToken() ? readSession() : null));
     const [cafe, setCafe] = useState(() => getActiveCafe());
     const [features, setFeatures] = useState(ALL_ON);
+    // Whether the map above is the server's answer or still the optimistic
+    // default. Rendering can be optimistic; fetching must not be.
+    const [featuresReady, setFeaturesReady] = useState(false);
 
     const signOut = useCallback(() => {
         setToken(null);
@@ -57,20 +60,31 @@ export function AuthProvider({ children }) {
     useEffect(() => {
         if (!session) {
             setFeatures(ALL_ON);
+            setFeaturesReady(false);
             return;
         }
 
         // A superadmin who has not picked a cafe has nothing to scope to.
         if (session.role === 'superadmin' && !cafe) {
             setFeatures(ALL_ON);
+            setFeaturesReady(false);
             return;
         }
 
         let cancelled = false;
+        setFeaturesReady(false);
 
         api.features()
-            .then((result) => !cancelled && setFeatures({ ...ALL_ON, ...result }))
-            .catch(() => !cancelled && setFeatures(ALL_ON));
+            .then((result) => {
+                if (cancelled) return;
+                setFeatures({ ...ALL_ON, ...result });
+                setFeaturesReady(true);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setFeatures(ALL_ON);
+                setFeaturesReady(true);
+            });
 
         return () => {
             cancelled = true;
@@ -117,8 +131,19 @@ export function AuthProvider({ children }) {
             cafe,
             workInCafe,
             features,
-            /** Core screens pass no feature name and are always allowed. */
+            featuresReady,
+            /**
+             * Optimistic: true until the server says otherwise. Good for
+             * rendering, because it avoids the nav flickering items in on
+             * every page load.
+             */
             can: (feature) => !feature || features[feature] !== false,
+            /**
+             * Pessimistic: false until the map has actually arrived. Use this
+             * to gate a FETCH — `can` alone would fire one doomed request for
+             * a disabled module before the answer lands.
+             */
+            canFetch: (feature) => featuresReady && (!feature || features[feature] !== false),
             isSuperadmin,
             // A superadmin passes every admin check once they have selected a
             // cafe, so the admin-only screens appear for them too.
@@ -128,7 +153,7 @@ export function AuthProvider({ children }) {
             // A superadmin who has not picked a cafe cannot use scoped screens.
             needsCafe: isSuperadmin && !cafe,
         };
-    }, [session, cafe, features, signIn, signOut, workInCafe]);
+    }, [session, cafe, features, featuresReady, signIn, signOut, workInCafe]);
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

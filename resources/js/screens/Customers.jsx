@@ -18,7 +18,7 @@ import {
 } from '../components/ui';
 
 export default function Customers() {
-    const { isAdmin } = useAuth();
+    const { isAdmin, canFetch } = useAuth();
     const [search, setSearch] = useState('');
     const [query, setQuery] = useState('');
     const [toppingUp, setToppingUp] = useState(null);
@@ -26,7 +26,13 @@ export default function Customers() {
     const [viewingWallet, setViewingWallet] = useState(null);
 
     const { data, error, loading, reload } = useAsync(() => api.customers({ search: query, limit: 200 }), [query]);
-    const packages = useAsync(() => api.packages({ active_only: true }), []);
+    // Gated the same way as the invoice catalogue: no doomed request when the
+    // owner has not granted this cafe the Loyalty module.
+    const hasLoyalty = canFetch('loyalty');
+    const packages = useAsync(
+        () => (hasLoyalty ? api.packages({ active_only: true }) : Promise.resolve([])),
+        [hasLoyalty],
+    );
 
     const customers = data ?? [];
 

@@ -21,6 +21,9 @@ export const CHART = {
         // Sequential blue, 100 → 700. Lightest = near zero.
         ramp: ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#2a78d6', '#256abf', '#184f95', '#0d366b'],
         empty: '#eceffa',
+        // Three fixed slots for the payment-split donut, assigned in order and
+        // never cycled. Validated all-pairs on this surface.
+        categorical: ['#2a78d6', '#eb6834', '#1baf7a'],
     },
     dark: {
         series: '#3987e5',
@@ -32,6 +35,9 @@ export const CHART = {
         text: '#eceffa',
         ramp: ['#0d366b', '#104281', '#184f95', '#256abf', '#2a78d6', '#3987e5', '#5598e7', '#86b6ef'],
         empty: '#151f3a',
+        // The same three hues, stepped for the dark surface — not an automatic
+        // flip of the light values.
+        categorical: ['#3987e5', '#d95926', '#199e70'],
     },
 };
 

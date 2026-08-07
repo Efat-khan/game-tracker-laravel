@@ -18,10 +18,11 @@ import {
 } from '../components/ui';
 
 export default function Invoices() {
-    const { isAdmin, can } = useAuth();
-    // Skip the catalogue fetch entirely when the owner has not granted this
-    // cafe the Products module — otherwise every visit 403s in the console.
-    const hasProducts = can('products');
+    const { isAdmin, canFetch } = useAuth();
+    // canFetch, not can: `can` is optimistic while the feature map is still in
+    // flight, which would fire one doomed request for a disabled module on
+    // every page load.
+    const hasProducts = canFetch('products');
     const [filters, setFilters] = useState({ payment_status: '', date_from: '', date_to: '' });
     const [expanded, setExpanded] = useState(null);
     const [busyId, setBusyId] = useState(null);
