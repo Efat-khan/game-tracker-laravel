@@ -132,6 +132,29 @@ async function safeJson(response) {
     }
 }
 
+/**
+ * Turn a `raw: true` response into a file on the user's disk.
+ *
+ * Downloads have to go through fetch so the bearer token rides along, which
+ * means the browser's own "save this" behaviour is bypassed and we have to
+ * synthesise the click ourselves.
+ */
+export async function saveResponseAs(response, filename) {
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    // Give the browser a tick to start reading the object before revoking it;
+    // Safari aborts the download otherwise.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 const get = (path, params) => request('GET', path, { params });
 const post = (path, body, params) => request('POST', path, { body: body ?? {}, params });
 const patch = (path, body) => request('PATCH', path, { body });
@@ -177,7 +200,10 @@ export const api = {
     discountInvoice: (id, body) => post(`/invoices/${id}/discount`, body),
     voidInvoice: (id, reason) => post(`/invoices/${id}/void`, { reason }),
     payInvoiceFromWallet: (id) => post(`/invoices/${id}/pay-wallet`),
-    invoicePdfUrl: (id) => `/api/invoices/${id}/pdf`,
+    // Both of these must be FETCHED, not linked. A plain <a href> is a browser
+    // navigation: it carries no Authorization header, so the API answers 401.
+    // `raw` hands back the Response so the caller can take the blob.
+    invoicePdf: (id) => request('GET', `/invoices/${id}/pdf`, { raw: true }),
     exportCsv: (params) => request('GET', '/invoices/export.csv', { params, raw: true }),
 
     /* ---- catalogue ----------------------------------------------------- */

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 import { api } from '../lib/api';
@@ -7,7 +7,7 @@ import { useAsync, useNow, usePolling } from '../lib/hooks';
 import { useChartTheme } from '../lib/charts';
 import { amount, day, duration, money, parseUtc } from '../lib/format';
 import { Link } from '../lib/router';
-import { Meter } from '../components/viz';
+import { Donut, Meter } from '../components/viz';
 import {
     Button,
     Card,
@@ -108,7 +108,7 @@ export default function Dashboard() {
 
             <ErrorNote error={error} onRetry={reload} />
 
-            <StationStrip
+            <StationGrid
                 rows={visible}
                 now={now}
                 onStart={setStarting}
@@ -121,12 +121,15 @@ export default function Dashboard() {
 
             <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
                 <IncomeCard rows={income.data} loading={income.loading} />
-                <UtilizationCard rows={utilization.data} loading={utilization.loading} />
+                <TodayCard income={income.data} />
             </div>
 
             <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
                 <FloorTable rows={visible} now={now} onEnd={setEnding} onStart={setStarting} />
-                <AttentionCard rows={rows} overdue={summary.overdue} />
+                <div className="grid gap-4">
+                    <UtilizationCard rows={utilization.data} loading={utilization.loading} />
+                    <AttentionCard rows={rows} overdue={summary.overdue} />
+                </div>
             </div>
 
             <StartSessionModal row={starting} onClose={() => setStarting(null)} onDone={reload} />
@@ -135,34 +138,27 @@ export default function Dashboard() {
     );
 }
 
-/* ------------------------------------------------------------- ticker strip */
+/* --------------------------------------------------------------- floor grid */
 
 /**
- * The horizontal strip of devices, scrolled with the arrows at its right.
+ * Every device on the floor, wrapped onto as many rows as it takes.
  *
- * Free cards are clickable in their entirety, which is how staff start a
- * session fastest — no aiming at a button.
+ * It deliberately does not scroll sideways: a device hidden off the edge of a
+ * track is a device nobody notices is free, and the whole point of this panel
+ * is that the floor is visible at a glance.
  */
-function StationStrip({ rows, now, onStart, onEnd, onMaintenance }) {
-    const track = useRef(null);
-
-    const scroll = (direction) =>
-        track.current?.scrollBy({ left: direction * 320, behavior: 'smooth' });
-
+function StationGrid({ rows, now, onStart, onEnd, onMaintenance }) {
     return (
-        <Card className="p-3">
-            <div className="flex items-center gap-3">
-                <div className="hidden shrink-0 pl-2 pr-1 sm:block">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        The floor
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-400">{rows.length} devices</p>
-                </div>
+        <Card className="p-4">
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">The floor</p>
+                <p className="text-xs text-slate-400">{rows.length} devices</p>
+            </div>
 
-                <div
-                    ref={track}
-                    className="flex flex-1 gap-3 overflow-x-auto scroll-smooth pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                >
+            {rows.length === 0 ? (
+                <p className="py-8 text-center text-sm text-slate-500">Nothing matches that search.</p>
+            ) : (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
                     {rows.map((row) => (
                         <StationTile
                             key={row.station_id}
@@ -173,34 +169,9 @@ function StationStrip({ rows, now, onStart, onEnd, onMaintenance }) {
                             onMaintenance={() => onMaintenance(row)}
                         />
                     ))}
-
-                    {rows.length === 0 && (
-                        <p className="px-3 py-6 text-sm text-slate-500">Nothing matches that search.</p>
-                    )}
                 </div>
-
-                <div className="flex shrink-0 gap-1">
-                    <ArrowButton onClick={() => scroll(-1)} label="Scroll left" d="M15 6l-6 6 6 6" />
-                    <ArrowButton onClick={() => scroll(1)} label="Scroll right" d="M9 6l6 6-6 6" />
-                </div>
-            </div>
+            )}
         </Card>
-    );
-}
-
-function ArrowButton({ onClick, label, d }) {
-    return (
-        <button
-            onClick={onClick}
-            aria-label={label}
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500
-                       transition hover:bg-slate-100 hover:text-slate-900
-                       dark:border-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-        >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d={d} strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-        </button>
     );
 }
 
@@ -214,18 +185,13 @@ function StationTile({ row, now, onStart, onEnd, onMaintenance }) {
 
     return (
         <div
-            className={`relative w-[15.5rem] shrink-0 rounded-xl border p-3 transition ${
+            className={`relative flex flex-col rounded-xl border p-3 transition ${
                 maintenance
                     ? 'border-amber-400/60 dark:border-amber-500/40'
                     : free
-                      ? 'cursor-pointer border-slate-200 hover:border-indigo-400 dark:border-slate-800 dark:hover:border-indigo-500/60'
+                      ? 'border-slate-200 hover:border-indigo-400 dark:border-slate-800 dark:hover:border-indigo-500/60'
                       : 'border-live-500/50 ct-live-ring'
             }`}
-            onClick={free ? onStart : undefined}
-            role={free ? 'button' : undefined}
-            tabIndex={free ? 0 : undefined}
-            onKeyDown={free ? (e) => (e.key === 'Enter' || e.key === ' ') && onStart() : undefined}
-            aria-label={free ? `Start a session on ${row.station_name}` : undefined}
         >
             <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -241,10 +207,7 @@ function StationTile({ row, now, onStart, onEnd, onMaintenance }) {
                 </div>
 
                 <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onMaintenance();
-                    }}
+                    onClick={onMaintenance}
                     title={row.maintenance ? 'Put back in service' : 'Mark out of service'}
                     aria-label={row.maintenance ? 'Put back in service' : 'Mark out of service'}
                     className={`shrink-0 rounded-lg p-1.5 transition ${
@@ -260,10 +223,12 @@ function StationTile({ row, now, onStart, onEnd, onMaintenance }) {
             </div>
 
             {free && (
-                <div className="mt-3 flex items-center justify-between">
-                    <span className="text-xs text-slate-400">Free</span>
-                    <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">Start →</span>
-                </div>
+                <>
+                    <p className="mt-3 flex-1 text-xs text-slate-400">Free</p>
+                    <Button size="sm" className="mt-2.5 w-full" onClick={onStart}>
+                        Start session
+                    </Button>
+                </>
             )}
 
             {maintenance && !row.session_id && (
@@ -272,7 +237,7 @@ function StationTile({ row, now, onStart, onEnd, onMaintenance }) {
 
             {row.session_id && (
                 <>
-                    <div className="mt-2.5 flex items-end justify-between gap-2">
+                    <div className="mt-2.5 flex flex-1 items-end justify-between gap-2">
                         <div className="min-w-0">
                             <p className="truncate text-xs text-slate-500">{row.customer_name}</p>
                             <p className="text-lg font-bold tabular-nums text-live-600 dark:text-live-400">
@@ -296,15 +261,7 @@ function StationTile({ row, now, onStart, onEnd, onMaintenance }) {
                         </div>
                     )}
 
-                    <Button
-                        size="sm"
-                        variant="success"
-                        className="mt-2.5 w-full"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            onEnd();
-                        }}
-                    >
+                    <Button size="sm" variant="success" className="mt-2.5 w-full" onClick={onEnd}>
                         End session
                     </Button>
                 </>
@@ -326,7 +283,9 @@ function IncomeCard({ rows, loading }) {
     const best = series.reduce((max, d) => Math.max(max, d.value), 0);
 
     return (
-        <Card className="p-5">
+        // A flex column so the chart grows to whatever height the card is given
+        // by the row, rather than leaving a slab of empty card beneath it.
+        <Card className="flex flex-col p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <h2 className="text-sm font-semibold">Takings</h2>
@@ -360,7 +319,7 @@ function IncomeCard({ rows, loading }) {
             {loading && !rows ? (
                 <Loading />
             ) : (
-                <ResponsiveContainer width="100%" height={210}>
+                <ResponsiveContainer width="100%" height="100%" minHeight={210} className="flex-1">
                     <AreaChart data={series} margin={{ top: 6, right: 6, bottom: 0, left: 0 }}>
                         <defs>
                             <linearGradient id="ct-income" x1="0" y1="0" x2="0" y2="1">
@@ -411,6 +370,112 @@ function IncomeCard({ rows, loading }) {
                 </ResponsiveContainer>
             )}
         </Card>
+    );
+}
+
+/* ----------------------------------------------------------------- today card */
+
+/**
+ * Who is signed in and what the till has taken — the old right rail, now a
+ * dashboard card.
+ *
+ * It used to be pinned beside every screen, which meant a fixed column of
+ * takings looming over Settings and Logs, where it means nothing. It belongs
+ * next to the floor it describes and nowhere else.
+ *
+ * The daily income series is passed in rather than fetched again: the takings
+ * chart above already has it, and two copies of the same figure that refresh on
+ * different clocks are two figures that will eventually disagree on screen.
+ */
+function TodayCard({ income }) {
+    const { session, isAdmin, cafeName } = useAuth();
+    const shift = useAsync(() => api.currentShift(), []);
+
+    // Same 5s cadence as the floor, so the card never lags the tiles beside it.
+    usePolling(shift.reload, 5000);
+
+    const totals = shift.data?.totals;
+    const today = income?.[income.length - 1];
+
+    const segments = [
+        { label: 'Cash', value: totals?.cash_sales ?? 0 },
+        { label: 'Phone', value: totals?.phone_sales ?? 0 },
+        { label: 'Wallet', value: totals?.wallet_sales ?? 0 },
+    ];
+
+    return (
+        <Card className="p-5">
+            <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-live-500 text-sm font-bold text-white shadow-[0_0_24px_-8px_var(--color-indigo-500)]">
+                    {(session?.email ?? '?').slice(0, 2).toUpperCase()}
+                </span>
+                <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold" title={session?.email}>
+                        {session?.email}
+                    </p>
+                    <p className="mt-0.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                        <span className="rounded-full bg-indigo-500/15 px-2 py-0.5 text-indigo-600 ring-1 ring-inset ring-indigo-500/30 dark:text-indigo-300">
+                            {session?.role}
+                        </span>
+                        <span className="truncate">{cafeName || '—'}</span>
+                    </p>
+                </div>
+            </div>
+
+            <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-800">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    {shift.data ? 'Taken this shift' : 'Taken today'}
+                </p>
+                <p className="mt-1 text-3xl font-bold tabular-nums">
+                    {money(totals?.total_sales ?? today?.income ?? 0)}
+                </p>
+
+                <div className="mt-4 grid grid-cols-3 gap-2">
+                    <TodayStat label="Cash" value={money(totals?.cash_sales ?? 0)} />
+                    <TodayStat label="Phone" value={money(totals?.phone_sales ?? 0)} />
+                    <TodayStat label="Wallet" value={money(totals?.wallet_sales ?? 0)} />
+                </div>
+            </div>
+
+            <div className="mt-5 border-t border-slate-200 pt-5 dark:border-slate-800">
+                {shift.data ? (
+                    <Donut
+                        segments={segments}
+                        centreLabel="In drawer"
+                        centreValue={money(shift.data.expected_cash ?? 0)}
+                    />
+                ) : (
+                    <div className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center dark:border-slate-700">
+                        <p className="text-sm text-slate-500">No shift is open.</p>
+                        <Link
+                            to="/shifts"
+                            className="mt-2 inline-block text-xs font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
+                        >
+                            Open one →
+                        </Link>
+                    </div>
+                )}
+            </div>
+
+            {isAdmin && (
+                <Link
+                    to="/analytics"
+                    className="mt-5 block overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-500 via-indigo-600 to-live-600 p-4 text-white transition hover:brightness-110"
+                >
+                    <p className="text-sm font-semibold leading-snug">See how the floor is really performing</p>
+                    <p className="mt-1 text-xs text-white/80">Utilization, peak hours and gross margin.</p>
+                </Link>
+            )}
+        </Card>
+    );
+}
+
+function TodayStat({ label, value }) {
+    return (
+        <div>
+            <p className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-500">{label}</p>
+            <p className="mt-0.5 truncate text-xs font-semibold tabular-nums">{value}</p>
+        </div>
     );
 }
 

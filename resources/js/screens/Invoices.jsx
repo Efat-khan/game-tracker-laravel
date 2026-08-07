@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../lib/api';
+import { api, saveResponseAs } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAsync } from '../lib/hooks';
 import { dateTime, money, paymentLabel } from '../lib/format';
@@ -61,14 +61,14 @@ export default function Invoices() {
     }
 
     async function downloadCsv() {
-        const response = await api.exportCsv({ ...filters, limit: 1000 });
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `invoices-${new Date().toISOString().slice(0, 10)}.csv`;
-        link.click();
-        URL.revokeObjectURL(url);
+        setActionError(null);
+
+        try {
+            const response = await api.exportCsv({ ...filters, limit: 1000 });
+            await saveResponseAs(response, `invoices-${new Date().toISOString().slice(0, 10)}.csv`);
+        } catch (err) {
+            setActionError(err);
+        }
     }
 
     return (
@@ -144,7 +144,22 @@ function InvoiceRow({ invoice, isAdmin, products, expanded, busy, onToggleExpand
     const [adding, setAdding] = useState(false);
     const [discounting, setDiscounting] = useState(false);
     const [voiding, setVoiding] = useState(false);
+    const [savingPdf, setSavingPdf] = useState(false);
     const isVoid = invoice.status === 'void';
+
+    async function onDownloadPdf() {
+        setSavingPdf(true);
+        onError(null);
+
+        try {
+            const response = await api.invoicePdf(invoice.id);
+            await saveResponseAs(response, `invoice-${invoice.id}.pdf`);
+        } catch (err) {
+            onError(err);
+        } finally {
+            setSavingPdf(false);
+        }
+    }
 
     return (
         <>
@@ -178,14 +193,9 @@ function InvoiceRow({ invoice, isAdmin, products, expanded, busy, onToggleExpand
                     )}
                 </td>
                 <td className="ct-td text-right">
-                    <a
-                        href={api.invoicePdfUrl(invoice.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"
-                    >
+                    <Button size="sm" variant="outline" busy={savingPdf} onClick={onDownloadPdf}>
                         PDF
-                    </a>
+                    </Button>
                 </td>
             </tr>
 

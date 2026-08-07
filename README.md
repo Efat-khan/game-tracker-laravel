@@ -91,7 +91,7 @@ php artisan serve
 
 | | |
 | --- | --- |
-| **Dashboard** | A welcome header with search, then a scrollable strip of every device refreshing every 5 s and pausing while the tab is hidden. Clicking anywhere on a free tile starts a session; live tiles show a ticking timer, running cost and a meter against `planned_minutes`. Below: a takings area chart with 7/14/30-day ranges, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
+| **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
 | **Stations** | Rates, controller limits, QR preview and PNG download. |
 | **Sessions** | History, filterable by station, status and date. |
 | **Invoices** | Click the status pill to settle or re-open. Expand a row for the money breakdown, item add/remove, wallet settlement and — admins only — discount and void. CSV export and per-row PDF. |
@@ -103,11 +103,15 @@ php artisan serve
 | **Logs / Staff / Settings / Cafes** | The activity log, accounts, billing rules with a worked example under each control, and cafe onboarding. |
 | **Check-in** *(public)* | Phone-shaped. Controller picker showing the effective rate as it changes. If a session is already running it shows the clock and cost — and deliberately **no stop button**. |
 
-The layout follows a trading-desk pattern: an icon-only left rail with hover
-labels, the app floating in one rounded panel, and a **right rail** carrying the
-signed-in account, the cafe being worked in, what has been taken this shift and
-a donut of the cash/phone/wallet split. The rail is present on every screen and
-drops away below 1280px.
+The layout follows a trading-desk pattern. The left sidebar shows icons **and**
+labels, and collapses to icons alone from the control at its foot; the choice is
+remembered across reloads, and hover labels appear while it is collapsed. Below
+1024px it becomes an off-canvas drawer.
+
+The signed-in account, the cafe being worked in, what has been taken this shift
+and a donut of the cash/phone/wallet split live in a card on the **Dashboard**,
+beside the floor they describe — not pinned to every screen, where takings mean
+nothing next to Settings or Logs.
 
 Two notes on how the SPA treats data. **Money never becomes a JavaScript
 number**: it arrives as a string and is only turned into digits for display,

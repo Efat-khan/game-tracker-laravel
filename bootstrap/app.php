@@ -26,6 +26,19 @@ return Application::configure(basePath: dirname(__DIR__))
         // Must run before anything reads the user or the cafe.
         $middleware->api(prepend: [ResetRequestState::class]);
 
+        /*
+         * Never redirect a guest — this app has no `login` route.
+         *
+         * Laravel's ApplicationBuilder installs a default redirect callback that
+         * calls route('login'), and Authenticate runs it BEFORE it throws
+         * AuthenticationException. So a browser NAVIGATION to an API route (a
+         * PDF opened in a new tab, say) died with a 500 "Route [login] not
+         * defined" that no exception renderer could intercept, because the
+         * RouteNotFoundException is raised inside the middleware itself.
+         * Returning null keeps every unauthenticated request on the 401 path.
+         */
+        $middleware->redirectGuestsTo(fn () => null);
+
         $middleware->alias([
             'cafe' => ResolveCafeContext::class,
             'admin' => EnsureAdmin::class,
@@ -35,5 +48,6 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // This is an API. Every error is JSON, whatever the client asked for.
         $exceptions->shouldRenderJsonWhen(fn (Request $request) => true);
     })->create();

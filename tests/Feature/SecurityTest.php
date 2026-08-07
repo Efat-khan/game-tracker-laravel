@@ -227,6 +227,20 @@ class SecurityTest extends TestCase
         $this->getJson('/api/stations', ['Authorization' => 'Bearer not-a-token'])->assertUnauthorized();
     }
 
+    /**
+     * A browser NAVIGATION to an API route sends Accept: text/html, not JSON.
+     *
+     * That took a different branch inside Laravel's Authenticate middleware,
+     * which tried to redirect the guest to a named `login` route. This app has
+     * none, so it answered 500 "Route [login] not defined" rather than 401.
+     * Every other test here asks for JSON, so none of them saw it.
+     */
+    public function test_a_guest_asking_for_html_still_gets_401_not_a_redirect(): void
+    {
+        $this->get('/api/stations', ['Accept' => 'text/html'])->assertUnauthorized();
+        $this->get('/api/invoices/1/pdf', ['Accept' => 'text/html'])->assertUnauthorized();
+    }
+
     public function test_a_token_signed_with_the_wrong_key_is_rejected(): void
     {
         $token = $this->tokenFor($this->admin);

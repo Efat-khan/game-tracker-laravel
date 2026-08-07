@@ -1,9 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/hooks';
 import { Link, useRouter } from '../lib/router';
-import { RightRail } from './RightRail';
-import { Button } from './ui';
 
 /**
  * Nav order is fixed by the spec.
@@ -76,157 +74,202 @@ export function BrandMark({ size = 'md' }) {
     );
 }
 
+const COLLAPSED_KEY = 'cafetrack.sidebar-collapsed';
+
+/**
+ * Whether the desktop sidebar is showing labels.
+ *
+ * It survives a reload, because a rail someone deliberately collapsed
+ * springing back open on every page load is worse than no toggle at all.
+ * Mobile ignores this entirely — the drawer is always labelled there.
+ */
+function useSidebarCollapsed() {
+    const [collapsed, setCollapsed] = useState(() => {
+        try {
+            return localStorage.getItem(COLLAPSED_KEY) === '1';
+        } catch {
+            return false;
+        }
+    });
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(COLLAPSED_KEY, collapsed ? '1' : '0');
+        } catch {
+            /* private browsing */
+        }
+    }, [collapsed]);
+
+    return [collapsed, () => setCollapsed((c) => !c)];
+}
+
 export function Shell({ children, onStartTour }) {
-    const { session, signOut, isAdmin, can, cafeName, needsCafe } = useAuth();
+    const { signOut, isAdmin, can, needsCafe } = useAuth();
     const { path } = useRouter();
     const { dark, toggle } = useTheme();
     const [mobileOpen, setMobileOpen] = useState(false);
+    const [collapsed, toggleCollapsed] = useSidebarCollapsed();
 
     const items = NAV.filter((item) => (!item.adminOnly || isAdmin) && can(item.feature));
 
     return (
-        <div className="min-h-screen lg:p-4">
-            {/* The whole app floats in one rounded panel, so the page behind it
-                reads as the surrounding room rather than more chrome. */}
-            <div
-                className="flex min-h-screen overflow-hidden border-slate-200 bg-white lg:min-h-[calc(100vh-2rem)]
-                           lg:rounded-3xl lg:border lg:shadow-2xl
-                           dark:border-slate-800 dark:bg-slate-900/50 dark:backdrop-blur-xl"
+        <div className="flex min-h-screen bg-white dark:bg-slate-950">
+            {mobileOpen && (
+                <div
+                    className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm lg:hidden"
+                    onClick={() => setMobileOpen(false)}
+                    aria-hidden="true"
+                />
+            )}
+
+            {/* Labels and icons together. Collapsing narrows it to the icons,
+                which is a choice the user makes rather than the default. */}
+            <nav
+                className={`fixed inset-y-0 left-0 z-50 flex w-60 shrink-0 flex-col border-r border-slate-200 bg-white
+                            transition-[transform,width] lg:static lg:translate-x-0
+                            dark:border-slate-800 dark:bg-slate-950
+                            ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
+                            ${collapsed ? 'lg:w-[4.75rem]' : 'lg:w-60'}`}
+                aria-label="Main"
             >
-                {mobileOpen && (
-                    <div
-                        className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm lg:hidden"
-                        onClick={() => setMobileOpen(false)}
-                        aria-hidden="true"
-                    />
-                )}
-
-                {/* Icon rail on desktop; a labelled drawer on mobile, where
-                    there is room for words and no hover to reveal them. */}
-                <nav
-                    className={`fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r border-slate-200 bg-white
-                                transition-transform lg:static lg:w-[4.75rem] lg:translate-x-0 lg:border-r-0 lg:bg-transparent
-                                dark:border-slate-800 dark:bg-slate-950
-                                ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
-                    aria-label="Main"
-                >
-                    <div className="flex items-center gap-2.5 px-5 py-5 lg:justify-center lg:px-0">
-                        <BrandMark />
-                        <span className="ct-brand text-base font-bold tracking-tight lg:hidden">CAFETRACK</span>
-                    </div>
-
-                    <div className="flex-1 space-y-1 overflow-y-auto px-3 py-2 lg:px-3">
-                        {items.map((item) => {
-                            const active = item.to === '/' ? path === '/' : path.startsWith(item.to);
-
-                            return (
-                                <Link
-                                    key={item.to}
-                                    to={item.to}
-                                    data-tour={item.to}
-                                    onClick={() => setMobileOpen(false)}
-                                    aria-label={item.label}
-                                    aria-current={active ? 'page' : undefined}
-                                    className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition
-                                                lg:justify-center lg:px-0 ${
-                                                    active
-                                                        ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-[0_0_20px_-6px_var(--color-indigo-500)]'
-                                                        : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100'
-                                                }`}
-                                >
-                                    <Icon name={item.icon} />
-                                    <span className="lg:hidden">{item.label}</span>
-
-                                    {/* Hover label, since the rail is icon-only
-                                        on desktop. title= would be too slow to
-                                        appear to be useful. */}
-                                    <span
-                                        className="pointer-events-none absolute left-full z-50 ml-3 hidden whitespace-nowrap rounded-lg
-                                                   bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-lg
-                                                   transition-opacity group-hover:opacity-100 lg:block
-                                                   dark:bg-slate-800"
-                                    >
-                                        {item.label}
-                                    </span>
-                                </Link>
-                            );
-                        })}
-                    </div>
-
-                    <div className="space-y-1 px-3 py-3">
-                        <RailButton onClick={onStartTour} label="Guide">
-                            <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-                                <circle cx="12" cy="12" r="9" />
-                                <path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.3M12 17h.01" strokeLinecap="round" />
-                            </svg>
-                        </RailButton>
-
-                        <RailButton onClick={toggle} label={dark ? 'Light mode' : 'Dark mode'}>
-                            {dark ? (
-                                <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-                                    <circle cx="12" cy="12" r="4" />
-                                    <path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" strokeLinecap="round" />
-                                </svg>
-                            ) : (
-                                <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-                                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" strokeLinejoin="round" />
-                                </svg>
-                            )}
-                        </RailButton>
-
-                        <RailButton onClick={signOut} label="Sign out">
-                            <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-                                <path d="M15 17l5-5-5-5M20 12H9M12 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h6" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                        </RailButton>
-                    </div>
-                </nav>
-
-                <div className="flex min-w-0 flex-1 flex-col">
-                    {/* Mobile bar: the rail is off-canvas here. */}
-                    <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 lg:hidden dark:border-slate-800">
-                        <button
-                            onClick={() => setMobileOpen(true)}
-                            aria-label="Open menu"
-                            className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-                        >
-                            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" />
-                            </svg>
-                        </button>
-                        <span className="ct-brand text-sm font-bold tracking-tight">CAFETRACK</span>
-                        <span className="w-9" />
-                    </div>
-
-                    <main className="min-w-0 flex-1 overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
-                        {needsCafe && path !== '/cafes' ? <NoCafeSelected /> : children}
-                    </main>
+                <div className={`flex items-center gap-2.5 px-5 py-5 ${collapsed ? 'lg:justify-center lg:px-0' : ''}`}>
+                    <BrandMark />
+                    <span className={`ct-brand text-base font-bold tracking-tight ${collapsed ? 'lg:hidden' : ''}`}>
+                        CAFETRACK
+                    </span>
                 </div>
 
-                <RightRail />
+                <div className="flex-1 space-y-1 overflow-y-auto px-3 py-2">
+                    {items.map((item) => {
+                        const active = item.to === '/' ? path === '/' : path.startsWith(item.to);
+
+                        return (
+                            <Link
+                                key={item.to}
+                                to={item.to}
+                                data-tour={item.to}
+                                onClick={() => setMobileOpen(false)}
+                                aria-current={active ? 'page' : undefined}
+                                className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition
+                                            ${collapsed ? 'lg:justify-center lg:px-0' : ''} ${
+                                                active
+                                                    ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-[0_0_20px_-6px_var(--color-indigo-500)]'
+                                                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100'
+                                            }`}
+                            >
+                                <Icon name={item.icon} />
+                                <span className={collapsed ? 'lg:hidden' : ''}>{item.label}</span>
+                                {collapsed && <RailTip label={item.label} />}
+                            </Link>
+                        );
+                    })}
+                </div>
+
+                <div className="space-y-1 border-t border-slate-200 px-3 py-3 dark:border-slate-800">
+                    <RailButton onClick={onStartTour} label="Guide" collapsed={collapsed}>
+                        <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                            <circle cx="12" cy="12" r="9" />
+                            <path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.3M12 17h.01" strokeLinecap="round" />
+                        </svg>
+                    </RailButton>
+
+                    <RailButton onClick={toggle} label={dark ? 'Light mode' : 'Dark mode'} collapsed={collapsed}>
+                        {dark ? (
+                            <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                                <circle cx="12" cy="12" r="4" />
+                                <path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" strokeLinecap="round" />
+                            </svg>
+                        ) : (
+                            <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" strokeLinejoin="round" />
+                            </svg>
+                        )}
+                    </RailButton>
+
+                    <RailButton onClick={signOut} label="Sign out" collapsed={collapsed}>
+                        <svg className="h-[18px] w-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
+                            <path d="M15 17l5-5-5-5M20 12H9M12 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                    </RailButton>
+
+                    {/* Desktop only: on mobile the drawer closes instead. */}
+                    <button
+                        onClick={toggleCollapsed}
+                        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                        aria-expanded={!collapsed}
+                        className={`group relative hidden w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium
+                                    text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 lg:flex
+                                    dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100
+                                    ${collapsed ? 'lg:justify-center lg:px-0' : ''}`}
+                    >
+                        <svg
+                            className={`h-[18px] w-[18px] transition-transform ${collapsed ? 'rotate-180' : ''}`}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M15 6l-6 6 6 6" />
+                        </svg>
+                        <span className={collapsed ? 'lg:hidden' : ''}>Collapse</span>
+                        {collapsed && <RailTip label="Expand sidebar" />}
+                    </button>
+                </div>
+            </nav>
+
+            <div className="flex min-w-0 flex-1 flex-col">
+                {/* Mobile bar: the sidebar is off-canvas here. */}
+                <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 lg:hidden dark:border-slate-800">
+                    <button
+                        onClick={() => setMobileOpen(true)}
+                        aria-label="Open menu"
+                        className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                    >
+                        <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" />
+                        </svg>
+                    </button>
+                    <span className="ct-brand text-sm font-bold tracking-tight">CAFETRACK</span>
+                    <span className="w-9" />
+                </div>
+
+                <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
+                    {needsCafe && path !== '/cafes' ? <NoCafeSelected /> : children}
+                </main>
             </div>
         </div>
     );
 }
 
-function RailButton({ onClick, label, children }) {
+/** The hover label a collapsed rail needs; title= appears far too slowly. */
+function RailTip({ label }) {
+    return (
+        <span
+            className="pointer-events-none absolute left-full z-50 ml-3 hidden whitespace-nowrap rounded-lg
+                       bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-lg
+                       transition-opacity group-hover:opacity-100 lg:block dark:bg-slate-800"
+        >
+            {label}
+        </span>
+    );
+}
+
+function RailButton({ onClick, label, collapsed, children }) {
     return (
         <button
             onClick={onClick}
             aria-label={label}
-            className="group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium
-                       text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 lg:justify-center lg:px-0
-                       dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
+            className={`group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium
+                        text-slate-500 transition hover:bg-slate-100 hover:text-slate-900
+                        dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100
+                        ${collapsed ? 'lg:justify-center lg:px-0' : ''}`}
         >
             {children}
-            <span className="lg:hidden">{label}</span>
-            <span
-                className="pointer-events-none absolute left-full z-50 ml-3 hidden whitespace-nowrap rounded-lg
-                           bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-lg
-                           transition-opacity group-hover:opacity-100 lg:block dark:bg-slate-800"
-            >
-                {label}
-            </span>
+            <span className={collapsed ? 'lg:hidden' : ''}>{label}</span>
+            {collapsed && <RailTip label={label} />}
         </button>
     );
 }
