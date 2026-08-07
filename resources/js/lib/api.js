@@ -1,0 +1,234 @@
+/**
+ * The one place that talks to the backend.
+ *
+ * Everything the screens need goes through `api`, mirroring the 69 routes.
+ * Two things this layer guarantees:
+ *
+ *   - Money stays a STRING all the way from the API to the screen. It is never
+ *     parsed into a JS number, because a float cannot hold every 2dp value and
+ *     a cafe's takings should not drift by a paisa on the way to a <td>.
+ *   - A 401 signs the user out rather than leaving a dead screen. Tokens last
+ *     12 hours and are invalidated server-side on a password or role change,
+ *     so this fires in normal use, not just on expiry.
+ */
+
+const TOKEN_KEY = 'cafetrack.token';
+const CAFE_KEY = 'cafetrack.cafe';
+
+export function getToken() {
+    try {
+        return localStorage.getItem(TOKEN_KEY);
+    } catch {
+        return null;
+    }
+}
+
+export function setToken(token) {
+    try {
+        token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY);
+    } catch {
+        /* private browsing */
+    }
+}
+
+/**
+ * The cafe a superadmin is currently working inside. Admins and staff are bound
+ * to their own cafe by their token and this is ignored for them — the server
+ * ignores the header too.
+ */
+export function getActiveCafe() {
+    try {
+        const raw = localStorage.getItem(CAFE_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+}
+
+export function setActiveCafe(cafe) {
+    try {
+        cafe ? localStorage.setItem(CAFE_KEY, JSON.stringify(cafe)) : localStorage.removeItem(CAFE_KEY);
+    } catch {
+        /* private browsing */
+    }
+}
+
+export class ApiError extends Error {
+    constructor(status, payload) {
+        super(payload?.message || `Request failed (${status})`);
+        this.status = status;
+        this.payload = payload;
+        // Laravel returns {message, errors:{field:[msg]}} on a 422.
+        this.errors = payload?.errors || null;
+    }
+
+    /** The first validation message, which is what a form wants to show. */
+    get firstError() {
+        if (!this.errors) return this.message;
+        const first = Object.values(this.errors)[0];
+        return Array.isArray(first) ? first[0] : this.message;
+    }
+}
+
+let onUnauthorized = () => {};
+
+export function setUnauthorizedHandler(fn) {
+    onUnauthorized = fn;
+}
+
+function buildQuery(params) {
+    if (!params) return '';
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== '') search.append(key, value);
+    }
+    const qs = search.toString();
+    return qs ? `?${qs}` : '';
+}
+
+async function request(method, path, { body, params, raw } = {}) {
+    const headers = { Accept: 'application/json' };
+    const token = getToken();
+
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const cafe = getActiveCafe();
+    if (cafe?.id) headers['X-Cafe-Id'] = String(cafe.id);
+
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+    const response = await fetch(`/api${path}${buildQuery(params)}`, {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+    if (response.status === 401) {
+        onUnauthorized();
+        throw new ApiError(401, { message: 'Your session has ended. Please sign in again.' });
+    }
+
+    if (raw) {
+        if (!response.ok) throw new ApiError(response.status, await safeJson(response));
+        return response;
+    }
+
+    if (response.status === 204) return null;
+
+    const payload = await safeJson(response);
+
+    if (!response.ok) throw new ApiError(response.status, payload);
+
+    return payload;
+}
+
+async function safeJson(response) {
+    const text = await response.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return { message: text.slice(0, 200) };
+    }
+}
+
+const get = (path, params) => request('GET', path, { params });
+const post = (path, body, params) => request('POST', path, { body: body ?? {}, params });
+const patch = (path, body) => request('PATCH', path, { body });
+const del = (path) => request('DELETE', path);
+
+export const api = {
+    /* ---- auth & cafes ------------------------------------------------- */
+    login: (email, password) => post('/auth/login', { email, password }),
+    myCafes: () => get('/cafes/mine'),
+    createCafe: (body) => post('/cafes', body),
+    updateCafe: (id, body) => patch(`/cafes/${id}`, body),
+
+    /* ---- stations ----------------------------------------------------- */
+    stations: () => get('/stations'),
+    createStation: (body) => post('/stations', body),
+    updateStation: (id, body) => patch(`/stations/${id}`, body),
+    deleteStation: (id) => del(`/stations/${id}`),
+    toggleMaintenance: (id, maintenance) => post(`/stations/${id}/maintenance`, { maintenance }),
+    qrCodeUrl: (id) => `/api/stations/${id}/qrcode`,
+
+    /* ---- public (no account) ------------------------------------------ */
+    publicStation: (id) => get(`/stations/${id}/public`),
+    checkin: (stationId, body, token) => post(`/checkin/${stationId}`, body, token ? { t: token } : null),
+
+    /* ---- sessions ----------------------------------------------------- */
+    activeSessions: () => get('/sessions/active'),
+    sessions: (params) => get('/sessions', params),
+    checkout: (sessionId, paymentMethod) =>
+        post(`/checkout/${sessionId}`, paymentMethod ? { payment_method: paymentMethod } : {}),
+    cancelSession: (id) => post(`/sessions/${id}/cancel`),
+
+    /* ---- invoices ------------------------------------------------------ */
+    invoices: (params) => get('/invoices', params),
+    updateInvoice: (id, body) => patch(`/invoices/${id}`, body),
+    addInvoiceItem: (id, body) => post(`/invoices/${id}/items`, body),
+    removeInvoiceItem: (id, itemId) => del(`/invoices/${id}/items/${itemId}`),
+    discountInvoice: (id, body) => post(`/invoices/${id}/discount`, body),
+    voidInvoice: (id, reason) => post(`/invoices/${id}/void`, { reason }),
+    payInvoiceFromWallet: (id) => post(`/invoices/${id}/pay-wallet`),
+    invoicePdfUrl: (id) => `/api/invoices/${id}/pdf`,
+    exportCsv: (params) => request('GET', '/invoices/export.csv', { params, raw: true }),
+
+    /* ---- catalogue ----------------------------------------------------- */
+    products: (params) => get('/products', params),
+    createProduct: (body) => post('/products', body),
+    updateProduct: (id, body) => patch(`/products/${id}`, body),
+    deleteProduct: (id) => del(`/products/${id}`),
+
+    packages: (params) => get('/packages', params),
+    createPackage: (body) => post('/packages', body),
+    updatePackage: (id, body) => patch(`/packages/${id}`, body),
+    deletePackage: (id) => del(`/packages/${id}`),
+
+    tiers: (params) => get('/tiers', params),
+    createTier: (body) => post('/tiers', body),
+    updateTier: (id, body) => patch(`/tiers/${id}`, body),
+    deleteTier: (id) => del(`/tiers/${id}`),
+
+    /* ---- customers & wallet -------------------------------------------- */
+    customers: (params) => get('/customers', params),
+    customer: (id) => get(`/customers/${id}`),
+    wallet: (id, params) => get(`/customers/${id}/wallet`, params),
+    topup: (id, body) => post(`/customers/${id}/topup`, body),
+    adjust: (id, body) => post(`/customers/${id}/adjust`, body),
+
+    /* ---- bookings ------------------------------------------------------ */
+    bookings: (params) => get('/bookings', params),
+    createBooking: (body) => post('/bookings', body),
+    updateBooking: (id, body) => patch(`/bookings/${id}`, body),
+    startBooking: (id) => post(`/bookings/${id}/start`),
+    cancelBooking: (id, noShow) => post(`/bookings/${id}/cancel`, { no_show: !!noShow }),
+
+    /* ---- shifts -------------------------------------------------------- */
+    shifts: (params) => get('/shifts', params),
+    currentShift: () => get('/shifts/current'),
+    shift: (id) => get(`/shifts/${id}`),
+    openShift: (body) => post('/shifts/open', body),
+    closeShift: (id, body) => post(`/shifts/${id}/close`, body),
+    cashMovement: (id, body) => post(`/shifts/${id}/cash`, body),
+
+    /* ---- analytics ------------------------------------------------------ */
+    dailyIncome: (params) => get('/analytics/daily-income', params),
+    topStations: (params) => get('/analytics/top-stations', params),
+    topCustomers: (params) => get('/analytics/top-customers', params),
+    peakHours: (params) => get('/analytics/peak-hours', params),
+    utilization: (params) => get('/analytics/utilization', params),
+    profit: (params) => get('/analytics/profit', params),
+    staffAnalytics: (params) => get('/analytics/staff', params),
+
+    /* ---- admin ---------------------------------------------------------- */
+    audit: (params) => get('/audit', params),
+    settings: () => get('/settings'),
+    updateSettings: (body) => patch('/settings', body),
+
+    staff: () => get('/staff'),
+    createStaff: (body) => post('/staff', body),
+    updateStaff: (id, body) => patch(`/staff/${id}`, body),
+    revokeStaff: (id) => post(`/staff/${id}/revoke`),
+    deleteStaff: (id) => del(`/staff/${id}`),
+};

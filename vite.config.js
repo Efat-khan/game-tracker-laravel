@@ -1,24 +1,28 @@
 import { defineConfig } from 'vite';
 import laravel from 'laravel-vite-plugin';
-import { bunny } from 'laravel-vite-plugin/fonts';
 import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
 
 export default defineConfig({
     plugins: [
         laravel({
-            input: ['resources/css/app.css', 'resources/js/app.js'],
+            input: ['resources/css/app.css', 'resources/js/app.jsx'],
             refresh: true,
-            fonts: [
-                bunny('Instrument Sans', {
-                    weights: [400, 500, 600],
-                }),
-            ],
         }),
+        react(),
         tailwindcss(),
     ],
     server: {
-        watch: {
-            ignored: ['**/storage/framework/views/**'],
+        watch: { ignored: ['**/storage/framework/views/**'] },
+    },
+    build: {
+        rollupOptions: {
+            output: {
+                // Recharts is the only heavy dependency; splitting it keeps the
+                // login and public check-in screens small. Rolldown (Vite 8)
+                // wants the function form, not a map.
+                manualChunks: (id) => (id.includes('node_modules/recharts') ? 'charts' : undefined),
+            },
         },
     },
 });

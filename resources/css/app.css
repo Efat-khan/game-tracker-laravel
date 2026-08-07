@@ -1,9 +1,58 @@
 @import 'tailwindcss';
 
-@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
-@source '../../storage/framework/views/*.php';
+@source '../js/**/*.{js,jsx}';
+@source '../views/**/*.blade.php';
+
+/* Light is the default; a `dark` class on <html> flips it. The toggle in the
+   sidebar writes that class and remembers the choice in localStorage. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    /* A system stack: no webfont fetched at build time, and Bangla customer
+       names render with whatever the device already has. */
+    --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Bengali',
+        'Helvetica Neue', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+}
+
+@layer base {
+    /* The dashboard refreshes every 5 seconds; without this the numbers jitter
+       as the scrollbar appears and disappears. */
+    html {
+        scrollbar-gutter: stable;
+    }
+}
+
+@layer components {
+    .ct-input {
+        @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900
+               placeholder:text-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-2
+               focus:ring-indigo-500/20 disabled:opacity-50
+               dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500;
+    }
+
+    .ct-label {
+        @apply mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400;
+    }
+
+    .ct-card {
+        @apply rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900;
+    }
+
+    .ct-th {
+        @apply px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide
+               text-slate-500 dark:text-slate-400;
+    }
+
+    .ct-td {
+        @apply px-4 py-3 text-sm text-slate-700 dark:text-slate-300;
+    }
+}
+
+/* The guided tour rings the current sidebar item. The dimming itself is done
+   with four panels around it (see Tour.jsx) rather than a giant outer shadow,
+   because the nav scrolls and would clip one. */
+.ct-spotlight {
+    position: relative;
+    border-radius: 0.5rem;
+    box-shadow: 0 0 0 3px rgb(99 102 241 / 0.95);
 }
