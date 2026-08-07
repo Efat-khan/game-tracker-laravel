@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AdminUser;
 use App\Models\Cafe;
+use App\Models\GameSession;
 use App\Models\Product;
 use App\Models\Station;
 use App\Services\SettingsService;
@@ -278,7 +279,7 @@ class AnalyticsTest extends TestCase
         // A session that ran for exactly one hour, wholly inside one clock hour.
         $start = now()->subDays(2)->setTime(14, 0);
 
-        \App\Models\GameSession::create([
+        GameSession::create([
             'cafe_id' => $this->cafe->id,
             'station_id' => $this->station->id,
             'customer_id' => $customer->id,
@@ -309,7 +310,7 @@ class AnalyticsTest extends TestCase
         // 14:30 to 15:30 — half an hour in each bucket.
         $start = now()->subDays(2)->setTime(14, 30);
 
-        \App\Models\GameSession::create([
+        GameSession::create([
             'cafe_id' => $this->cafe->id,
             'station_id' => $this->station->id,
             'customer_id' => $customer->id,

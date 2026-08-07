@@ -6,8 +6,8 @@ use App\Models\AdminUser;
 use App\Models\Cafe;
 use App\Models\Customer;
 use App\Models\Station;
-use App\Support\Money;
 use App\Services\SettingsService;
+use App\Support\Money;
 use Tests\TestCase;
 
 /**
@@ -229,7 +229,7 @@ class BillingTest extends TestCase
             'hourly_rate' => '999.00',
         ])->assertOk();
 
-        $again = $this->apiGet($this->admin, "/api/sessions?limit=1")->json();
+        $again = $this->apiGet($this->admin, '/api/sessions?limit=1')->json();
         $this->assertNotEmpty($again);
 
         $this->assertDatabaseHas('invoices', [

@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\MembershipTier;
 use App\Support\Money;
 use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
 
 /**
  * §5.3 — membership tiers, reached by lifetime spend.
@@ -67,7 +68,7 @@ class LoyaltyService
             return ['amount' => Money::zero(), 'reason' => null, 'tier' => $tier];
         }
 
-        $amount = Money::round($base->multipliedBy($percent)->dividedBy(100, 8, \Brick\Math\RoundingMode::HalfUp));
+        $amount = Money::round($base->multipliedBy($percent)->dividedBy(100, 8, RoundingMode::HalfUp));
 
         // Trailing zeros trimmed: "Silver member 5%", not "5.00%".
         $reason = sprintf('%s member %s%%', $tier->name, Money::trimPercent($percent));

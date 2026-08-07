@@ -1,58 +1,347 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# CafeTrack
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Gaming cafe management SaaS — **Laravel 13 + MySQL 8**, rebuilt from the
+FastAPI + PostgreSQL reference implementation.
 
-## About Laravel
+A cafe rents PS5s, PCs and consoles by the hour. Players scan a QR sticker on
+the booth and start their own session from their phone; staff watch a live
+dashboard, end sessions, take payment and reconcile the drawer; the owner gets
+analytics. **One deployment hosts many cafes, and each sees only its own data.**
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+All money is Bangladeshi Taka (৳).
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+---
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## The two decisions
 
-## Learning Laravel
+**Frontend: (A) API-only.** This repository is the JSON API and nothing else.
+The existing Next.js frontend consumes it unchanged, so the contract in §6 of
+the specification is binding to the letter — all **69 routes**, the status
+codes, and the response shapes. There is no Blade, no Inertia and no `web.php`.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+**Auth: JWT** (HS256, via `firebase/php-jwt`) rather than Sanctum. Option (A)
+is what makes this the right call: the token claims are identical to the
+FastAPI reference's (`sub`, `email`, `role`, `cafe`, `tv`), so pointing
+`JWT_SECRET` at the old backend's `SECRET_KEY` lets both mint tokens the other
+accepts and the two can run side by side during a migration. It also keeps
+`admin_users.token_version` as the real sign-out-everywhere mechanism the
+schema calls for, with no extra token table.
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+---
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+## Setup
 
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+### Docker (recommended)
 
 ```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+cp .env.example .env
+php artisan key:generate            # or: docker compose run --rm app php artisan key:generate --show
+docker compose up -d
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+The API is on <http://localhost:8000/api>. The stack migrates and seeds on
+boot, giving you three accounts (password `password` for all three):
 
-## Contributing
+| Email | Role |
+| --- | --- |
+| `owner@cafetrack.test` | superadmin (no cafe) |
+| `admin@cafetrack.test` | admin of "My Gaming Cafe" |
+| `staff@cafetrack.test` | staff of "My Gaming Cafe" |
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+For production, `docker-compose.prod.yml` runs Caddy in front, which obtains
+and renews TLS certificates automatically:
 
-## Code of Conduct
+```bash
+CAFETRACK_DOMAIN=cafetrack.example.com \
+FRONTEND_BASE_URL=https://app.example.com \
+APP_KEY=base64:… DB_PASSWORD=… \
+docker compose -f docker-compose.prod.yml up -d
+```
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### Without Docker
 
-## Security Vulnerabilities
+Needs PHP 8.3+ and MySQL 8.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```bash
+composer install
+cp .env.example .env && php artisan key:generate
+php artisan migrate --seed
+php artisan serve
+```
 
-## License
+### Tests
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+```bash
+php artisan test
+```
+
+**191 feature tests, all green.** They hit real HTTP routes, each against a
+fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
+without a MySQL server). The migrations are written to compile identically on
+both; the MySQL DDL is what the schema section below describes.
+
+| Group | Tests |
+| --- | --- |
+| Billing | 27 |
+| Tenancy | 27 |
+| Security | 19 |
+| Cafe management, staff, settings | 19 |
+| Permissions | 18 |
+| Analytics | 17 |
+| Bookings | 17 |
+| Shifts | 15 |
+| POS | 15 |
+| Wallet & loyalty | 14 |
+| Auth | 3 |
+
+---
+
+## Billing
+
+Money is never a float. It is `DECIMAL(10,2)` in the database, exact decimal
+arithmetic in PHP (`brick/math`), and a **string** on the wire — `"250.00"`,
+never `250.0`. `App\Support\Money` is the only place that rounds, and it always
+rounds half **up**, the way a cash drawer does.
+
+`App\Services\BillingService` implements the rules in order.
+
+**Step 0 — the effective hourly rate, fixed at check-in.** A station's
+`hourly_rate` covers the *first* controller; each one after that adds
+`extra_controller_rate`:
+
+```
+effective_rate = hourly_rate + extra_controller_rate × max(0, controllers − 1)
+```
+
+৳150 base + ৳50/extra with 3 controllers = **৳250/hr**. Asking for more
+controllers than the station takes is a **400** that names the limit.
+
+The rate is **snapshotted onto the session** (`hourly_rate_snapshot`,
+`base_rate_snapshot`, `extra_controller_rate_snapshot`, `controllers`), so a
+later price change never alters a session already running or an invoice already
+issued.
+
+**Step 1 — time rounds up to a whole block.**
+
+```
+actual_minutes = floor((end − start) / 60)
+billed_minutes = max(1, ceil(actual_minutes / block)) × block
+```
+
+A 3-minute session on a 15-minute block bills as 15. A block of `1` means
+per-minute billing.
+
+**Step 2 — money rounds to the nearest step.**
+
+```
+gross = round_half_up(billed_minutes / 60 × effective_rate, 2)
+total = round_half_up(gross / step, 0) × step
+if gross > 0 and total <= 0: total = step
+```
+
+৳202 → ৳200, ৳400.56 → ৳400, ৳102.50 → ৳105. That last line is the one that
+matters: **a nonzero bill never rounds away to free.**
+
+**Step 3 — the loyalty discount** comes off that total.
+
+**The live "cost so far"** on the dashboard uses exact minutes with **neither**
+rounding step. Both apply only when the session ends.
+
+`block` and `step` come from `app_settings`, keyed on `(cafe_id, key)`, so two
+cafes genuinely hold different billing rules.
+
+---
+
+## Roles
+
+| | superadmin | admin | staff |
+| --- | :-: | :-: | :-: |
+| Belongs to a cafe | no (`cafe_id` NULL) | one | one |
+| Create / suspend cafes | ✅ | — | — |
+| Start, end and cancel sessions | ✅ | ✅ | ✅ |
+| Add and remove invoice items | ✅ | ✅ | ✅ |
+| Mark an **unpaid** invoice **paid** | ✅ | ✅ | ✅ |
+| Wallet top-ups | ✅ | ✅ | ✅ |
+| Shifts, cash in/out | ✅ | ✅ | ✅ |
+| Bookings | ✅ | ✅ | ✅ |
+| Change an invoice's payment method | ✅ | ✅ | ❌ |
+| Revert **paid → unpaid** | ✅ | ✅ | ❌ |
+| Discounts, voids, manual balance adjustments | ✅ | ✅ | ❌ |
+| Stations, products, packages, tiers | ✅ | ✅ | ❌ |
+| Settings, staff accounts, activity log | ✅ | ✅ | ❌ |
+
+Two details worth stating plainly:
+
+- **A superadmin passes every admin check once they have selected a cafe.**
+  Otherwise the platform owner could open a tenant but not fix anything in it.
+- **Staff may choose cash or phone when settling an invoice** — picking the
+  method *is* part of marking it paid. What they cannot do is re-open the
+  question afterwards on an invoice that is already paid.
+
+The last admin in a cafe cannot be demoted or deleted.
+
+---
+
+## Multi-tenancy
+
+Every operational table carries `cafe_id`, and every query filters on it.
+`App\Support\Tenancy\CafeContext` is the single place that knows which cafe a
+request is acting on:
+
+- `scope(Model::class)` starts a query already narrowed to the active cafe.
+- `find(Model::class, $id)` is **"find by id within this cafe, else 404"** —
+  the helper every by-id route goes through.
+
+The rules it enforces:
+
+1. **An admin/staff token is bound to its own cafe.** Any `X-Cafe-Id` the
+   client sends is ignored outright; a tenant cannot widen its own reach.
+2. **A superadmin names a cafe per request** with `X-Cafe-Id`. Missing header →
+   **400**. Unknown id → **404**. Never a silent default to cafe 1.
+3. **Another tenant's record answers 404, not 403.** A 403 would confirm the
+   record exists, which is itself a leak.
+4. **`admin_users.cafe_id` is nullable with no default.** This is a real bug
+   from the reference implementation — the ORM applied a column default over an
+   explicit NULL and the platform owner appeared in a cafe's staff list. There
+   is a test named after it.
+5. Login emails are unique **platform-wide**, so a sign-in is never ambiguous.
+6. Logging in to a suspended cafe is refused.
+7. `app_settings` is keyed on `(cafe_id, key)`.
+8. The same phone number in two cafes is two separate customers, and two cafes
+   can book the same slot.
+
+One more, which the specification does not ask for but the guarantee needs:
+`ResetRequestState` clears the memoised auth guard and the scoped cafe at the
+start of every API request. Laravel's `RequestGuard` caches its resolved user
+and never clears it when the request is swapped — invisible under PHP-FPM,
+where each request gets a fresh application, but under Octane, a queue worker
+or the test suite a second request can otherwise inherit the first one's
+tenant. For an app whose central promise is tenant isolation, that is not worth
+leaving to the process model.
+
+---
+
+## Money-adjacent invariants
+
+- `total_amount = session_amount + items_amount − discount_amount`, re-established
+  after every mutation.
+- **Voiding keeps the invoice** and excludes it from all revenue, analytics and
+  lifetime spend. A wallet-paid invoice refunds the balance and writes a
+  `refund` row.
+- **Every** change to `customers.balance` writes a `wallet_transactions` row
+  with the signed amount and the resulting `balance_after`. The ledger is the
+  audit trail; the balance is a cache of it.
+- **Lifetime spend is computed**, never stored, from paid non-void invoices, so
+  it cannot drift when an invoice is voided.
+- Line items snapshot **both** `unit_price` and `unit_cost`, so profit reports
+  stay correct after supplier prices change.
+- A product that has been sold, or a station with history, is **retired**
+  (`is_active = false`), not deleted.
+
+### The cash drawer
+
+An invoice records `paid_at` and the `shift_id` that **collected** it — takings
+land in the shift that took the money, not the one that started the session.
+
+```
+expected_cash = opening_float + cash_sales + cash_topups + paid_in − paid_out
+variance      = counted_cash − expected_cash
+```
+
+**Only cash touches the drawer.** Phone payments and wallet spends are excluded
+on purpose: that money never entered the till (wallet credit was paid for, and
+counted, back at top-up time).
+
+Closing **freezes** `expected_cash` and `variance` onto the row, so a void the
+next day cannot rewrite a reconciliation someone has already signed off.
+
+---
+
+## Security
+
+**Tokens** carry `sub`, `email`, `role`, `cafe` (nullable), `tv` and `exp`
+(12 hours). `admin_users.token_version` is bumped on a password change, a role
+change or a forced sign-out, and **every request compares the `tv` claim
+against the stored value** — that is how one click signs a user out of every
+device. Passwords are bcrypt, so hashes from the reference implementation
+import unchanged and nobody has to reset a password.
+
+**Signed QR codes.** Station ids are sequential, so a bare `/checkin/{id}` link
+is guessable. Every QR encodes
+`{FRONTEND_BASE_URL}/checkin/{id}?t={token}` where the token is the first 16
+hex characters of `HMAC-SHA256(APP_KEY, "station:{id}")`, compared in constant
+time. With `REQUIRE_QR_TOKEN=true` an anonymous check-in without a valid token
+is **403**. Signed-in staff bypass it — they start sessions from the dashboard,
+where there is no code to scan.
+
+**Rate limits** are per client IP over a one-minute window, honouring
+`X-Forwarded-For`: check-in 10/min, login 10/min, public station lookup
+120/min. `0` disables a limit. Exceeding one returns **429** with `Retry-After`.
+
+**The public station endpoint never leaks a phone number** — only the
+customer's name.
+
+---
+
+## Schema
+
+15 tables plus `app_settings`. All money `DECIMAL(10,2)`, `discount_percent`
+`DECIMAL(5,2)`, all timestamps naive UTC `DATETIME`, everything
+`utf8mb4_unicode_ci` (customer names and notes contain Bangla text).
+
+```
+cafes  admin_users  stations  customers  sessions  invoices  invoice_items
+products  packages  membership_tiers  wallet_transactions  bookings
+shifts  cash_movements  audit_events  app_settings
+```
+
+Indexed on `cafe_id` everywhere it exists, plus `sessions.station_id`,
+`sessions.status`, `bookings.station_id`, and a **unique** `invoices.session_id`
+— ending a session creates exactly one invoice.
+
+`invoice_items` and `cash_movements` deliberately carry no `cafe_id`; they are
+scoped through their invoice and shift respectively.
+
+`app_settings` is a composite primary key on `(cafe_id, key)`. `key` is a MySQL
+reserved word and is quoted accordingly.
+
+---
+
+## Status codes
+
+| | |
+| --- | --- |
+| **400** | bad state (double-book, too many controllers, station out of service, insufficient wallet balance, missing `X-Cafe-Id`) |
+| **401** | unauthenticated |
+| **403** | wrong role, or an unsigned anonymous check-in |
+| **404** | missing **or another tenant's** |
+| **409** | conflict (second check-in on a busy station, overlapping booking, already-closed session or shift) |
+| **422** | validation |
+| **429** | rate limited |
+
+Creates return **201**; deletes return **204**.
+
+---
+
+## Deviations from the specification
+
+Three, all small, all deliberate:
+
+1. **`brick/math` instead of the bcmath extension.** The specification allows
+   "BCMath or a decimal library". The build environment could not install the
+   PHP extension, so the decimal library does the arithmetic; it uses bcmath
+   automatically when present, and the Docker image installs it for speed.
+   Money is exact decimal either way, and never a float.
+
+2. **`GET /api/shifts/current` returns a literal JSON `null`** when no shift is
+   open. Laravel's `response()->json(null)` emits `{}`, because Symfony swaps a
+   null payload for an empty object, and the client needs to tell "no shift
+   open" apart from "a shift with no fields".
+
+3. **`ResetRequestState` middleware**, described under multi-tenancy above. It
+   is not in the specification; it closes a tenant-isolation hole that only
+   appears when the container outlives the request.
+
+The test count is **191** rather than the reference's 109 — the same groups,
+covered a little more thickly, plus a group for cafe onboarding and catalogue
+lifecycle that the reference folds into its other suites.

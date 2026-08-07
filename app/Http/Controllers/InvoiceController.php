@@ -11,7 +11,9 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\Product;
+use App\Services\InvoicePdfService;
 use App\Services\InvoiceService;
+use App\Services\WalletService;
 use App\Support\Money;
 use App\Support\Tenancy\CafeContext;
 use Illuminate\Database\Eloquent\Builder;
@@ -97,7 +99,7 @@ class InvoiceController extends Controller
     {
         $invoice = $this->context->find(Invoice::class, $id);
 
-        $pdf = app(\App\Services\InvoicePdfService::class)->render($invoice);
+        $pdf = app(InvoicePdfService::class)->render($invoice);
 
         return response($pdf, 200, [
             'Content-Type' => 'application/pdf',
@@ -260,7 +262,7 @@ class InvoiceController extends Controller
 
         $total = Money::of($invoice->total_amount);
 
-        if (! app(\App\Services\WalletService::class)->hasBalance($customer, $total)) {
+        if (! app(WalletService::class)->hasBalance($customer, $total)) {
             return response()->json([
                 'message' => sprintf(
                     'Not enough balance: %s available, %s needed.',

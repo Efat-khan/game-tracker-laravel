@@ -100,7 +100,7 @@ class PosTest extends TestCase
         $this->apiDelete($this->staff, "/api/invoices/{$invoice['id']}/items/{$added['item']['id']}")
             ->assertNoContent();
 
-        $after = $this->apiGet($this->staff, "/api/invoices?limit=1")->json()[0];
+        $after = $this->apiGet($this->staff, '/api/invoices?limit=1')->json()[0];
 
         $this->assertSame('0.00', $after['items_amount']);
         $this->assertSame('150.00', $after['total_amount']);

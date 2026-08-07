@@ -16,6 +16,7 @@ use App\Services\BillingService;
 use App\Services\StationTokenService;
 use App\Support\Money;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Hash;
 
 /**
@@ -85,7 +86,7 @@ class DatabaseSeeder extends Seeder
         );
     }
 
-    /** @return \Illuminate\Support\Collection<int, Station> */
+    /** @return Collection<int, Station> */
     private function stations(Cafe $cafe)
     {
         $qr = app(StationTokenService::class);
@@ -121,7 +122,7 @@ class DatabaseSeeder extends Seeder
         });
     }
 
-    /** @return \Illuminate\Support\Collection<int, Product> */
+    /** @return Collection<int, Product> */
     private function products(Cafe $cafe)
     {
         $rows = [
@@ -179,7 +180,7 @@ class DatabaseSeeder extends Seeder
         }
     }
 
-    /** @return \Illuminate\Support\Collection<int, Customer> */
+    /** @return Collection<int, Customer> */
     private function customers(Cafe $cafe)
     {
         $rows = [

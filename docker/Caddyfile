@@ -1,0 +1,23 @@
+{$CAFETRACK_DOMAIN} {
+	root * /var/www/html/public
+
+	# Caddy obtains and renews the certificate automatically.
+	encode gzip zstd
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	php_fastcgi app:9000 {
+		root /var/www/html/public
+	}
+
+	file_server
+
+	@dotfiles path_regexp \.(?!well-known)
+	respond @dotfiles 403
+}

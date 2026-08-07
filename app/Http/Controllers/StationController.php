@@ -140,7 +140,7 @@ class StationController extends Controller
         }
 
         $png = (new Builder(
-            writer: new PngWriter(),
+            writer: new PngWriter,
             data: $this->qr->checkinUrl($station->id),
             size: 320,
             margin: 12,
