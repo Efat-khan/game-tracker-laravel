@@ -45,6 +45,23 @@ RUN composer install \
         --no-dev --no-scripts --no-autoloader --prefer-dist --no-interaction
 
 ###############################################################################
+# Frontend — the React SPA Laravel serves
+###############################################################################
+
+FROM node:22-alpine AS frontend
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY vite.config.js ./
+COPY resources ./resources
+
+# No network needed: there is no webfont to fetch.
+RUN npm run build
+
+###############################################################################
 # Application
 ###############################################################################
 
@@ -52,6 +69,7 @@ FROM base AS app
 
 COPY --from=vendor /var/www/html/vendor ./vendor
 COPY . .
+COPY --from=frontend /app/public/build ./public/build
 
 RUN composer dump-autoload --optimize --no-dev --no-interaction \
     && chown -R www-data:www-data storage bootstrap/cache \

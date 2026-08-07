@@ -14,10 +14,26 @@ All money is Bangladeshi Taka (৳).
 
 ## The two decisions
 
-**Frontend: (A) API-only.** This repository is the JSON API and nothing else.
-The existing Next.js frontend consumes it unchanged, so the contract in §6 of
-the specification is binding to the letter — all **69 routes**, the status
-codes, and the response shapes. There is no Blade, no Inertia and no `web.php`.
+**Frontend: a React SPA served by Laravel, consuming the JSON API.**
+
+The backend was built first as option (A) API-only, on the specification's
+assurance that an existing Next.js frontend would consume it unchanged. That
+frontend is not in this repository and was never available, so the app had no
+usable interface — all 69 routes and no way for staff to reach them. The UI
+here closes that gap.
+
+It is option (B)-shaped — everything under one Laravel roof, React rendering
+the screens — but without Inertia. Inertia wants page props from Laravel
+controllers, which would mean rebuilding the query logic behind all 69 routes a
+second time. The SPA instead calls the same API any other client would, so the
+tested backend is reused whole and a Next.js app can still be swapped back in
+later. Option (C) Blade + Livewire would have meant the same duplication with
+every screen rewritten server-side.
+
+**Fifteen screens**: the fourteen admin screens behind a fixed sidebar, plus
+the public check-in page a player opens by scanning a booth's QR sticker. Light
+theme by default with a dark toggle remembered in the browser, and the guided
+tour.
 
 **Auth: JWT** (HS256, via `firebase/php-jwt`) rather than Sanctum. Option (A)
 is what makes this the right call: the token claims are identical to the
@@ -64,10 +80,38 @@ Needs PHP 8.3+ and MySQL 8.
 
 ```bash
 composer install
+npm install && npm run build      # or `npm run dev` for hot reload
 cp .env.example .env && php artisan key:generate
 php artisan migrate --seed
 php artisan serve
 ```
+
+### The screens
+
+| | |
+| --- | --- |
+| **Dashboard** | A card per device, refreshing every 5 s and pausing while the tab is hidden. Clicking anywhere on a free card starts a session; occupied cards show a live timer and running cost, a wrench for maintenance, and an overdue badge past `planned_minutes`. |
+| **Stations** | Rates, controller limits, QR preview and PNG download. |
+| **Sessions** | History, filterable by station, status and date. |
+| **Invoices** | Click the status pill to settle or re-open. Expand a row for the money breakdown, item add/remove, wallet settlement and — admins only — discount and void. CSV export and per-row PDF. |
+| **Products / Loyalty** | The catalogue, top-up packages and membership tiers. |
+| **Customers** | Tier, visits, lifetime spend and balance; top up from a package or a custom amount, browse the wallet ledger, and (admins) correct a balance by hand. |
+| **Bookings** | Upcoming reservations; Arrived turns one into a live session. |
+| **Shifts** | Live totals split by method, a Drawer panel showing the expected-cash arithmetic line by line, cash in/out and close. |
+| **Analytics** | Income and hours charts, gross-profit tiles, utilization bars, a 7 × 24 peak-hours heatmap, and the top station and customer rankings. |
+| **Logs / Staff / Settings / Cafes** | The activity log, accounts, billing rules with a worked example under each control, and cafe onboarding. |
+| **Check-in** *(public)* | Phone-shaped. Controller picker showing the effective rate as it changes. If a session is already running it shows the clock and cost — and deliberately **no stop button**. |
+
+Two notes on how the SPA treats data. **Money never becomes a JavaScript
+number**: it arrives as a string and is only turned into digits for display,
+because a float cannot hold every 2dp value. **Timestamps get a `Z` appended
+before parsing**: the API sends naive UTC, and without it the browser would
+read every time as local and be wrong by the viewer's offset.
+
+There is no routing library. Every published version of the obvious one
+currently carries open advisories — none of which apply to a client-only SPA,
+but all of which surface in `npm audit` — so a ~50-line History API router
+stands in. `npm audit` reports **0 vulnerabilities**.
 
 ### Tests
 
@@ -342,6 +386,21 @@ Three, all small, all deliberate:
    is not in the specification; it closes a tenant-isolation hole that only
    appears when the container outlives the request.
 
-The test count is **191** rather than the reference's 109 — the same groups,
-covered a little more thickly, plus a group for cafe onboarding and catalogue
-lifecycle that the reference folds into its other suites.
+4. **The frontend is a React SPA rather than one of the three listed options**,
+   for the reason given at the top: option (A)'s existing Next.js app was not
+   available, and (B)'s Inertia layer would have duplicated the whole API.
+
+5. **No webfont.** The build fetched one from a CDN at build time, which fails
+   behind a proxy and in an offline CI. A system stack replaces it, with
+   `Noto Sans Bengali` in the list so Bangla customer names render.
+
+The backend test count is **191** rather than the reference's 109 — the same
+groups, covered a little more thickly, plus a group for cafe onboarding and
+catalogue lifecycle that the reference folds into its other suites.
+
+**The frontend has no automated tests.** It was verified by driving the real
+app in Chromium: signing in, loading all fourteen admin screens against seeded
+data with no console errors, and running a full session end to end — a signed
+QR check-in on a phone viewport, the occupied card appearing on the dashboard,
+ending the session with payment, and the resulting invoice breakdown. That is a
+manual check, not a suite; a regression here would not be caught automatically.
