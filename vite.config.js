@@ -19,9 +19,8 @@ export default defineConfig({
         rollupOptions: {
             output: {
                 // Recharts is the only heavy dependency; splitting it keeps the
-                // login and public check-in screens small. Rolldown (Vite 8)
-                // wants the function form, not a map.
-                manualChunks: (id) => (id.includes('node_modules/recharts') ? 'charts' : undefined),
+                // login and public check-in screens small.
+                manualChunks: { charts: ['recharts'] },
             },
         },
     },

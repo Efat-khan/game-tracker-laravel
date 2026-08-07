@@ -1,6 +1,6 @@
 # CafeTrack
 
-Gaming cafe management SaaS — **Laravel 13 + MySQL 8**, rebuilt from the
+Gaming cafe management SaaS — **Laravel 12 + MySQL 8**, rebuilt from the
 FastAPI + PostgreSQL reference implementation.
 
 A cafe rents PS5s, PCs and consoles by the hour. Players scan a QR sticker on
@@ -76,7 +76,7 @@ docker compose -f docker-compose.prod.yml up -d
 
 ### Without Docker
 
-Needs PHP 8.3+ and MySQL 8.
+Needs PHP 8.2+ and MySQL 8.
 
 ```bash
 composer install
@@ -377,6 +377,12 @@ Three, all small, all deliberate:
    automatically when present, and the Docker image installs it for speed.
    Money is exact decimal either way, and never a float.
 
+   It is pinned to `^0.14` deliberately. Laravel 12 accepts `^0.11` upwards,
+   but `RoundingMode` only became an enum in 0.14 — on an older resolution the
+   billing code's `RoundingMode::HalfUp` would silently be an undefined
+   constant. The pin is what keeps `composer update` from rounding your money
+   differently.
+
 2. **`GET /api/shifts/current` returns a literal JSON `null`** when no shift is
    open. Laravel's `response()->json(null)` emits `{}`, because Symfony swaps a
    null payload for an empty object, and the client needs to tell "no shift
@@ -393,6 +399,10 @@ Three, all small, all deliberate:
 5. **No webfont.** The build fetched one from a CDN at build time, which fails
    behind a proxy and in an offline CI. A system stack replaces it, with
    `Noto Sans Bengali` in the list so Bangla customer names render.
+
+Both dependency audits are clean: `composer audit` and `npm audit` each report
+no advisories. `firebase/php-jwt` is on `^7.1` for that reason — everything
+below 7.0 carries CVE-2025-45769.
 
 The backend test count is **191** rather than the reference's 109 — the same
 groups, covered a little more thickly, plus a group for cafe onboarding and
