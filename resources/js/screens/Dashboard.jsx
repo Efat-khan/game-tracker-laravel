@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAsync, useNow, usePolling } from '../lib/hooks';
 import { useChartTheme } from '../lib/charts';
-import { amount, day, duration, money, parseUtc } from '../lib/format';
+import { amount, day, duration, money, parseUtc, rateFor } from '../lib/format';
 import { Link } from '../lib/router';
 import { Donut, Meter } from '../components/viz';
 import {
@@ -678,8 +678,7 @@ function StartSessionModal({ row, onClose, onDone }) {
     const max = row?.max_controllers ?? 1;
 
     // Show the rate the player will actually pay as they change the picker.
-    const effective =
-        Number(row?.hourly_rate ?? 0) + Number(row?.extra_controller_rate ?? 0) * Math.max(0, controllers - 1);
+    const effective = rateFor(row, controllers);
 
     async function submit(event) {
         event.preventDefault();

@@ -59,9 +59,9 @@ class SessionService
             $customer = $this->resolveCustomer($locked->cafe_id, $data['name'], $data['phone_or_id']);
 
             $effectiveRate = $this->billing->effectiveRate(
-                $locked->hourly_rate,
-                $locked->extra_controller_rate,
+                $locked->rateMap(),
                 $controllers,
+                $locked->hourly_rate,
             );
 
             $session = GameSession::create([
@@ -73,7 +73,14 @@ class SessionService
                 // Snapshotted so a later price change never alters this session.
                 'hourly_rate_snapshot' => (string) $effectiveRate,
                 'base_rate_snapshot' => (string) Money::round($locked->hourly_rate),
-                'extra_controller_rate_snapshot' => (string) Money::round($locked->extra_controller_rate),
+                // Kept for the record, and for rows written before rates were
+                // looked up per controller count: what each extra pad cost on
+                // average, which under a flat model was the whole story.
+                'extra_controller_rate_snapshot' => (string) $this->billing->averageExtraRate(
+                    $effectiveRate,
+                    $locked->hourly_rate,
+                    $controllers,
+                ),
                 'controllers' => $controllers,
                 'planned_minutes' => $data['planned_minutes'] ?? null,
                 'created_at' => now(),

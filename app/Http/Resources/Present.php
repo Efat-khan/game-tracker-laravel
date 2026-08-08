@@ -38,7 +38,10 @@ final class Present
             'name' => $station->name,
             'type' => $station->type,
             'hourly_rate' => Money::str($station->hourly_rate),
-            'extra_controller_rate' => Money::str($station->extra_controller_rate),
+            // The price list, keyed on controller count. hourly_rate is the
+            // one-controller entry, repeated for the many screens that only
+            // want a headline figure.
+            'rates' => $station->rateMap(),
             'max_controllers' => $station->max_controllers,
             'qr_code_url' => $station->qr_code_url,
             'is_active' => (bool) $station->is_active,

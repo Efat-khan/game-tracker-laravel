@@ -97,3 +97,17 @@ export function titleCase(value) {
 
 export const paymentLabel = (method) =>
     ({ cash: 'Cash', phone_payment: 'Phone', wallet: 'Wallet' })[method] || '—';
+
+/**
+ * The hourly rate a station charges for a given number of controllers.
+ *
+ * A lookup, not a sum — a price list does not have to step evenly, so there is
+ * no "base plus extra" arithmetic to do. Returns a STRING, because money never
+ * becomes a JavaScript number on the way to the screen. Falls back to the
+ * headline rate if the count somehow has no entry.
+ */
+export function rateFor(station, controllers) {
+    const rates = station?.rates ?? {};
+
+    return String(rates[controllers] ?? rates[String(controllers)] ?? station?.hourly_rate ?? '0');
+}

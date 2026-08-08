@@ -27,7 +27,9 @@ class SessionController extends Controller
      */
     public function active(): JsonResponse
     {
-        $stations = $this->context->scope(Station::class)->orderBy('id')->get();
+        // with('rates') so the price list does not cost one query per
+        // station — the dashboard re-reads this list every five seconds.
+        $stations = $this->context->scope(Station::class)->with('rates')->orderBy('id')->get();
 
         $sessions = GameSession::with('customer')
             ->whereIn('station_id', $stations->pluck('id'))
@@ -45,7 +47,7 @@ class SessionController extends Controller
                 'station_name' => $station->name,
                 'station_type' => $station->type,
                 'hourly_rate' => Money::str($station->hourly_rate),
-                'extra_controller_rate' => Money::str($station->extra_controller_rate),
+                'rates' => $station->rateMap(),
                 'max_controllers' => $station->max_controllers,
                 'is_active' => (bool) $station->is_active,
                 'maintenance' => (bool) $station->maintenance,

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, getToken } from '../lib/api';
 import { useAsync, useNow, usePolling } from '../lib/hooks';
-import { duration, money, parseUtc } from '../lib/format';
+import { duration, money, parseUtc, rateFor } from '../lib/format';
 import { BrandMark } from '../components/Shell';
 import { Button, Card, Field, Input, Loading, Spinner } from '../components/ui';
 
@@ -133,8 +133,7 @@ function StartForm({ station, qrToken, onStarted }) {
 
     // The picker shows the rate changing as controllers are added, so nobody is
     // surprised by the bill.
-    const effective =
-        Number(station.hourly_rate) + Number(station.extra_controller_rate) * Math.max(0, controllers - 1);
+    const effective = rateFor(station, controllers);
 
     async function submit(event) {
         event.preventDefault();

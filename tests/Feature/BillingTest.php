@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Models\AdminUser;
 use App\Models\Cafe;
 use App\Models\Customer;
+use App\Models\GameSession;
 use App\Models\Station;
+use App\Models\StationRate;
 use App\Services\SettingsService;
 use App\Support\Money;
 use Tests\TestCase;
@@ -374,5 +376,191 @@ class BillingTest extends TestCase
             'name' => 'Rafi Ahmed',
             'phone_or_id' => '01711111111',
         ])->assertStatus(400);
+    }
+
+    /* --------------------------------------- rates per controller count */
+
+    public function test_a_rate_is_looked_up_per_controller_count(): void
+    {
+        // The shape a flat "extra controller" charge cannot express: the second
+        // pad adds 20, the third and fourth add 40 each.
+        $station = $this->makeStation($this->cafe, [
+            'hourly_rate' => '100.00',
+            'rates' => [1 => '100.00', 2 => '120.00', 3 => '160.00', 4 => '200.00'],
+        ]);
+
+        foreach ([1 => '100.00', 2 => '120.00', 3 => '160.00', 4 => '200.00'] as $controllers => $expected) {
+            $this->postJson("/api/checkin/{$station->id}", [
+                'name' => 'Rafi Ahmed',
+                'phone_or_id' => '0171000000'.$controllers,
+                'controllers' => $controllers,
+            ], $this->headersFor($this->admin))->assertCreated();
+
+            $session = GameSession::where('station_id', $station->id)->where('status', 'active')->firstOrFail();
+            $this->assertSame($expected, $session->hourly_rate_snapshot);
+
+            $this->apiPost($this->admin, "/api/checkout/{$session->id}")->assertCreated();
+        }
+    }
+
+    public function test_the_station_payload_carries_the_whole_price_list(): void
+    {
+        $station = $this->makeStation($this->cafe, [
+            'hourly_rate' => '160.00',
+            'rates' => [1 => '160.00', 2 => '200.00', 3 => '260.00', 4 => '320.00'],
+        ]);
+
+        $listed = collect($this->apiGet($this->admin, '/api/stations')->assertOk()->json())
+            ->firstWhere('id', $station->id);
+
+        $this->assertSame('160.00', $listed['hourly_rate']);
+        $this->assertSame(['1' => '160.00', '2' => '200.00', '3' => '260.00', '4' => '320.00'], $listed['rates']);
+
+        // The public check-in page prices the controller picker from this.
+        $this->getJson("/api/stations/{$station->id}/public")
+            ->assertOk()
+            ->assertJsonPath('rates.3', '260.00');
+    }
+
+    public function test_a_station_is_created_with_a_rate_for_every_count(): void
+    {
+        $id = $this->apiPost($this->admin, '/api/stations', [
+            'name' => 'PS4 - Booth 1',
+            'type' => 'PS4',
+            'hourly_rate' => '100.00',
+            'max_controllers' => 4,
+            'rates' => [1 => '100.00', 2 => '120.00', 3 => '160.00', 4 => '200.00'],
+        ])->assertCreated()->json('id');
+
+        $this->assertSame(4, StationRate::where('station_id', $id)->count());
+        $this->assertSame('160.00', StationRate::where('station_id', $id)->where('controllers', 3)->value('hourly_rate'));
+    }
+
+    public function test_omitting_the_rates_prices_every_count_at_the_base(): void
+    {
+        // A one-controller station should not have to spell out a price list.
+        $id = $this->apiPost($this->admin, '/api/stations', [
+            'name' => 'Racing Wheel',
+            'type' => 'Wheel',
+            'hourly_rate' => '400.00',
+            'max_controllers' => 3,
+        ])->assertCreated()->json('id');
+
+        $this->assertSame(
+            ['400.00', '400.00', '400.00'],
+            StationRate::where('station_id', $id)->orderBy('controllers')->pluck('hourly_rate')->map(strval(...))->all(),
+        );
+    }
+
+    public function test_a_partial_price_list_is_refused(): void
+    {
+        // Silently defaulting the missing counts is a pricing bug nobody
+        // notices until the end of the month.
+        $this->apiPost($this->admin, '/api/stations', [
+            'name' => 'PS5 - Booth 9',
+            'type' => 'PS5',
+            'hourly_rate' => '160.00',
+            'max_controllers' => 4,
+            'rates' => [1 => '160.00', 2 => '200.00'],
+        ])->assertStatus(422)->assertJsonValidationErrors('rates');
+    }
+
+    public function test_a_rate_above_the_maximum_is_refused(): void
+    {
+        $this->apiPost($this->admin, '/api/stations', [
+            'name' => 'PS5 - Booth 9',
+            'type' => 'PS5',
+            'hourly_rate' => '160.00',
+            'max_controllers' => 2,
+            'rates' => [1 => '160.00', 2 => '200.00', 3 => '260.00'],
+        ])->assertStatus(422)->assertJsonValidationErrors('rates');
+    }
+
+    public function test_a_free_rate_is_refused(): void
+    {
+        $this->apiPost($this->admin, '/api/stations', [
+            'name' => 'PS5 - Booth 9',
+            'type' => 'PS5',
+            'hourly_rate' => '160.00',
+            'max_controllers' => 2,
+            'rates' => [1 => '160.00', 2 => '0'],
+        ])->assertStatus(422)->assertJsonValidationErrors('rates.2');
+    }
+
+    public function test_editing_the_price_list_replaces_it(): void
+    {
+        $station = $this->makeStation($this->cafe, ['max_controllers' => 4]);
+
+        $this->apiPatch($this->admin, "/api/stations/{$station->id}", [
+            'hourly_rate' => '180.00',
+            'max_controllers' => 4,
+            'rates' => [1 => '180.00', 2 => '220.00', 3 => '280.00', 4 => '340.00'],
+        ])->assertOk()->assertJsonPath('rates.2', '220.00');
+
+        $this->assertSame(4, StationRate::where('station_id', $station->id)->count());
+    }
+
+    public function test_lowering_the_maximum_drops_the_rates_above_it(): void
+    {
+        // Otherwise a price nobody can reach sits in the table and reappears
+        // the moment the maximum goes back up.
+        $station = $this->makeStation($this->cafe, ['max_controllers' => 4]);
+
+        $this->apiPatch($this->admin, "/api/stations/{$station->id}", [
+            'max_controllers' => 2,
+            'rates' => [1 => '150.00', 2 => '200.00'],
+        ])->assertOk();
+
+        $this->assertSame(2, StationRate::where('station_id', $station->id)->count());
+    }
+
+    public function test_raising_the_maximum_prices_the_new_counts(): void
+    {
+        $station = $this->makeStation($this->cafe, ['hourly_rate' => '150.00', 'max_controllers' => 2]);
+
+        $this->apiPatch($this->admin, "/api/stations/{$station->id}", ['max_controllers' => 4])->assertOk();
+
+        // No rates were sent, so the new counts fall back to the base price
+        // rather than being left free.
+        $this->assertSame(4, StationRate::where('station_id', $station->id)->count());
+        $this->assertSame(
+            '150.00',
+            (string) StationRate::where('station_id', $station->id)->where('controllers', 4)->value('hourly_rate'),
+        );
+    }
+
+    public function test_the_headline_rate_follows_the_one_controller_price(): void
+    {
+        // hourly_rate is what the stations list and the check-in page show, so
+        // it must not drift from the price list beside it.
+        $station = $this->makeStation($this->cafe, ['hourly_rate' => '150.00', 'max_controllers' => 2]);
+
+        $this->apiPatch($this->admin, "/api/stations/{$station->id}", [
+            'max_controllers' => 2,
+            'rates' => [1 => '175.00', 2 => '210.00'],
+        ])->assertOk()->assertJsonPath('hourly_rate', '175.00');
+
+        $this->assertSame('175.00', $station->fresh()->hourly_rate);
+    }
+
+    public function test_a_price_change_never_moves_a_running_session(): void
+    {
+        $station = $this->makeStation($this->cafe, [
+            'hourly_rate' => '100.00',
+            'rates' => [1 => '100.00', 2 => '120.00', 3 => '160.00', 4 => '200.00'],
+        ]);
+
+        $this->postJson("/api/checkin/{$station->id}", [
+            'name' => 'Rafi Ahmed', 'phone_or_id' => '01711111111', 'controllers' => 3,
+        ], $this->headersFor($this->admin))->assertCreated();
+
+        $this->apiPatch($this->admin, "/api/stations/{$station->id}", [
+            'hourly_rate' => '500.00',
+            'max_controllers' => 4,
+            'rates' => [1 => '500.00', 2 => '600.00', 3 => '700.00', 4 => '800.00'],
+        ])->assertOk();
+
+        $session = GameSession::where('station_id', $station->id)->where('status', 'active')->firstOrFail();
+        $this->assertSame('160.00', $session->hourly_rate_snapshot);
     }
 }

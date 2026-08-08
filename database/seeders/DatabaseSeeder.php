@@ -12,6 +12,7 @@ use App\Models\MembershipTier;
 use App\Models\Package;
 use App\Models\Product;
 use App\Models\Station;
+use App\Models\StationRate;
 use App\Services\BillingService;
 use App\Services\StationTokenService;
 use App\Support\Money;
@@ -91,26 +92,36 @@ class DatabaseSeeder extends Seeder
     {
         $qr = app(StationTokenService::class);
 
+        /*
+         * Rates per controller count, taken from a real cafe's price list.
+         *
+         * Note that PS4 and PS5 do not step evenly — the second pad adds less
+         * than the third and fourth do. That is exactly the shape the old
+         * base-plus-flat-extra model could not express, and why the rates live
+         * in their own table.
+         */
         $definitions = [];
 
-        for ($i = 1; $i <= 3; $i++) {
-            $definitions[] = ["PS5 - Booth {$i}", 'PS5', '150.00', '50.00', 4];
+        for ($i = 1; $i <= 2; $i++) {
+            $definitions[] = ["PS4 - Booth {$i}", 'PS4', [1 => '100.00', 2 => '120.00', 3 => '160.00', 4 => '200.00']];
         }
 
         for ($i = 1; $i <= 4; $i++) {
-            $definitions[] = ["PC - Desk {$i}", 'PC', '100.00', '0.00', 1];
+            $definitions[] = ["PS5 - Booth {$i}", 'PS5', [1 => '160.00', 2 => '200.00', 3 => '260.00', 4 => '320.00']];
         }
 
-        $definitions[] = ['Xbox - Lounge', 'Xbox', '120.00', '40.00', 4];
+        $definitions[] = ['PS5 Pro - Lounge', 'PS5Pro', [1 => '240.00', 2 => '300.00', 3 => '360.00', 4 => '420.00']];
+        $definitions[] = ['Racing Wheel', 'Wheel', [1 => '400.00']];
 
         return collect($definitions)->map(function (array $d) use ($cafe, $qr) {
+            [$name, $type, $rates] = $d;
+
             $station = Station::create([
                 'cafe_id' => $cafe->id,
-                'name' => $d[0],
-                'type' => $d[1],
-                'hourly_rate' => $d[2],
-                'extra_controller_rate' => $d[3],
-                'max_controllers' => $d[4],
+                'name' => $name,
+                'type' => $type,
+                'hourly_rate' => $rates[1],
+                'max_controllers' => count($rates),
                 'is_active' => true,
                 'created_at' => now(),
             ]);
@@ -118,7 +129,15 @@ class DatabaseSeeder extends Seeder
             $station->qr_code_url = $qr->checkinUrl($station->id);
             $station->save();
 
-            return $station;
+            foreach ($rates as $controllers => $rate) {
+                StationRate::create([
+                    'station_id' => $station->id,
+                    'controllers' => $controllers,
+                    'hourly_rate' => $rate,
+                ]);
+            }
+
+            return $station->load('rates');
         });
     }
 
@@ -224,7 +243,7 @@ class DatabaseSeeder extends Seeder
 
                 $controllers = $station->max_controllers > 1 ? mt_rand(1, $station->max_controllers) : 1;
 
-                $rate = $billing->effectiveRate($station->hourly_rate, $station->extra_controller_rate, $controllers);
+                $rate = $billing->effectiveRate($station->rateMap(), $controllers, $station->hourly_rate);
 
                 $session = GameSession::create([
                     'cafe_id' => $cafe->id,
@@ -235,7 +254,11 @@ class DatabaseSeeder extends Seeder
                     'status' => 'completed',
                     'hourly_rate_snapshot' => (string) $rate,
                     'base_rate_snapshot' => (string) Money::round($station->hourly_rate),
-                    'extra_controller_rate_snapshot' => (string) Money::round($station->extra_controller_rate),
+                    'extra_controller_rate_snapshot' => (string) $billing->averageExtraRate(
+                        $rate,
+                        $station->hourly_rate,
+                        $controllers,
+                    ),
                     'controllers' => $controllers,
                     'created_at' => $start,
                 ]);

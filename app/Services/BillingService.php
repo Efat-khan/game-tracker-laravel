@@ -22,20 +22,46 @@ use Carbon\CarbonInterface;
 class BillingService
 {
     /**
-     * Step 0. The station's hourly_rate covers the FIRST controller; each one
-     * after that adds extra_controller_rate per hour.
+     * Step 0. Look the hourly rate up by controller count.
      *
-     *   ৳150 base + ৳50/extra with 3 controllers = ৳250/hr
+     *   [1 => 100, 2 => 120, 3 => 160, 4 => 200] with 3 controllers = ৳160/hr
+     *
+     * A lookup rather than arithmetic, because real price lists do not step
+     * evenly — the example above adds 20 for the second pad and 40 for the
+     * third, and no single per-extra figure reproduces it.
+     *
+     * `$fallback` is the station's one-controller rate, used only if the count
+     * has no row. That should not happen — saving a station writes a row for
+     * every count up to its maximum — but a hole must not price a session at
+     * zero.
      */
     public function effectiveRate(
+        array $ratesByControllers,
+        int $controllers,
+        BigDecimal|string|int|float|null $fallback = null,
+    ): BigDecimal {
+        $rate = $ratesByControllers[max(1, $controllers)] ?? $fallback;
+
+        return Money::round(Money::of($rate));
+    }
+
+    /**
+     * What each controller past the first worked out at, for the session
+     * snapshot. Descriptive only — nothing bills from it.
+     */
+    public function averageExtraRate(
+        BigDecimal|string|int|float|null $effectiveRate,
         BigDecimal|string|int|float|null $baseRate,
-        BigDecimal|string|int|float|null $extraRate,
         int $controllers,
     ): BigDecimal {
         $extras = max(0, $controllers - 1);
 
+        if ($extras === 0) {
+            return Money::round(0);
+        }
+
         return Money::round(
-            Money::of($baseRate)->plus(Money::of($extraRate)->multipliedBy($extras))
+            Money::of($effectiveRate)->minus(Money::of($baseRate))->dividedBy($extras, 2, RoundingMode::HalfUp)
         );
     }
 

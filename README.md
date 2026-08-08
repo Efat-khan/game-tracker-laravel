@@ -92,7 +92,7 @@ php artisan serve
 | | |
 | --- | --- |
 | **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
-| **Stations** | Rates, controller limits, QR preview and PNG download. |
+| **Stations** | A price per controller count — the boxes follow the controller limit, so raising it asks for the new prices — plus QR preview and PNG download. |
 | **Sessions** | History, filterable by station, status and date. |
 | **Invoices** | Click the status pill to settle or re-open. Expand a row for the money breakdown, item add/remove, wallet settlement and — admins only — discount and void. CSV export and per-row PDF. |
 | **Products / Loyalty** | The catalogue, top-up packages and membership tiers. |
@@ -235,14 +235,14 @@ off under `prefers-reduced-motion`.
 php artisan test
 ```
 
-**237 feature tests, all green.** They hit real HTTP routes, each against a
+**249 feature tests, all green.** They hit real HTTP routes, each against a
 fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
 without a MySQL server). The migrations are written to compile identically on
 both; the MySQL DDL is what the schema section below describes.
 
 | Group | Tests |
 | --- | --- |
-| Billing | 27 |
+| Billing | 39 |
 | Tenancy | 27 |
 | Security | 20 |
 | Cafe management, staff, settings | 28 |
@@ -267,21 +267,37 @@ rounds half **up**, the way a cash drawer does.
 
 `App\Services\BillingService` implements the rules in order.
 
-**Step 0 — the effective hourly rate, fixed at check-in.** A station's
-`hourly_rate` covers the *first* controller; each one after that adds
-`extra_controller_rate`:
+**Step 0 — the effective hourly rate, fixed at check-in.** A station carries
+one hourly rate **per controller count**, in `station_rates`, and the rate is
+looked up rather than computed:
 
 ```
-effective_rate = hourly_rate + extra_controller_rate × max(0, controllers − 1)
+effective_rate = station_rates[controllers]
 ```
 
-৳150 base + ৳50/extra with 3 controllers = **৳250/hr**. Asking for more
-controllers than the station takes is a **400** that names the limit.
+```
+1 pad ৳100   2 pads ৳120   3 pads ৳160   4 pads ৳200
+```
+
+This is a lookup and not `base + extra × (n − 1)` because **real price lists do
+not step evenly**. The row above — taken from an actual cafe's price list —
+adds ৳20 for the second pad and ৳40 for the third and fourth, and no single
+"extra controller" figure reproduces it. The flat model that used to be here
+could express one of that cafe's four device types.
+
+Saving a station writes a row for every count from 1 to its `max_controllers`,
+so a lookup can never miss; the API refuses a price list with a hole in it, or
+one carrying a count above the maximum. `stations.hourly_rate` is the
+1-controller price, kept in step with the table because it is the headline
+figure on the floor and on the QR page. Asking for more controllers than the
+station takes is a **400** that names the limit.
 
 The rate is **snapshotted onto the session** (`hourly_rate_snapshot`,
-`base_rate_snapshot`, `extra_controller_rate_snapshot`, `controllers`), so a
-later price change never alters a session already running or an invoice already
-issued.
+`base_rate_snapshot`, `controllers`), so a later price change never alters a
+session already running or an invoice already issued.
+`extra_controller_rate_snapshot` is still written — what each pad past the first
+worked out at — but nothing bills from it; it is there so rows written under the
+old flat model stay comparable.
 
 **Step 1 — time rounds up to a whole block.**
 
@@ -447,7 +463,8 @@ customer's name.
 
 ## Schema
 
-15 tables plus `app_settings`, `cafe_features` and `platform_settings`. All
+15 tables plus `app_settings`, `cafe_features`, `platform_settings` and
+`station_rates`. All
 money `DECIMAL(10,2)`, `discount_percent` `DECIMAL(5,2)`, all timestamps naive
 UTC `DATETIME`, everything `utf8mb4_unicode_ci` (customer names and notes
 contain Bangla text).
@@ -456,7 +473,7 @@ contain Bangla text).
 cafes  admin_users  stations  customers  sessions  invoices  invoice_items
 products  packages  membership_tiers  wallet_transactions  bookings
 shifts  cash_movements  audit_events  app_settings  cafe_features
-platform_settings
+platform_settings  station_rates
 ```
 
 Indexed on `cafe_id` everywhere it exists, plus `sessions.station_id`,
@@ -468,6 +485,9 @@ scoped through their invoice and shift respectively.
 
 `app_settings` is a composite primary key on `(cafe_id, key)`. `key` is a MySQL
 reserved word and is quoted accordingly.
+
+`station_rates` is a composite primary key on `(station_id, controllers)` and
+cascades on delete — a price list has no meaning without its station.
 
 `platform_settings` is the one table with no `cafe_id` at all — it holds the
 branding a visitor sees before they have signed in, when there is no cafe to

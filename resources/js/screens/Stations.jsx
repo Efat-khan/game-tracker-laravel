@@ -20,11 +20,89 @@ import {
 const BLANK = {
     name: '',
     type: 'PS5',
-    hourly_rate: '150',
-    extra_controller_rate: '50',
     max_controllers: 4,
     is_active: true,
+    // One price per controller count. The 1-controller entry is the station's
+    // headline hourly rate.
+    rates: { 1: '150', 2: '200', 3: '260', 4: '320' },
 };
+
+/** The saved price list as a form-friendly {count: "text"} map. */
+function ratesFrom(station) {
+    const max = station.max_controllers ?? 1;
+    const saved = station.rates ?? {};
+    const base = String(station.hourly_rate ?? '0');
+    const out = {};
+
+    for (let n = 1; n <= max; n++) out[n] = String(saved[n] ?? saved[String(n)] ?? base);
+
+    return out;
+}
+
+/** The whole price list on one line of the stations table. */
+function RateChips({ rates }) {
+    const entries = Object.entries(rates ?? {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+
+    if (entries.length === 0) return <span className="text-xs text-slate-400">—</span>;
+
+    return (
+        <div className="flex flex-wrap gap-1">
+            {entries.map(([controllers, rate]) => (
+                <span
+                    key={controllers}
+                    title={`${controllers} controller${controllers === '1' ? '' : 's'}`}
+                    className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] tabular-nums text-slate-600
+                               dark:bg-slate-800 dark:text-slate-300"
+                >
+                    <span className="text-slate-400">{controllers}×</span> {money(rate)}
+                </span>
+            ))}
+        </div>
+    );
+}
+
+/**
+ * A rate per controller count.
+ *
+ * One row per count up to the station's maximum, because a real price list does
+ * not step evenly — 100 / 120 / 160 / 200 adds 20 for the second pad and 40 for
+ * the third and fourth, which no single "extra controller" figure can express.
+ */
+function RateTable({ max, rates, onChange }) {
+    const counts = Array.from({ length: Math.max(1, Math.min(8, max)) }, (_, i) => i + 1);
+
+    return (
+        <div>
+            <span className="ct-label">Hourly rate by controllers</span>
+            <p className="-mt-0.5 mb-2 text-xs text-slate-500">
+                What one hour costs for each number of pads. Set them independently — they do not have to step
+                evenly.
+            </p>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {counts.map((n) => (
+                    <label key={n} className="block">
+                        <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                            {n} controller{n === 1 ? '' : 's'}
+                        </span>
+                        <Input
+                            required
+                            type="number"
+                            min="0.01"
+                            step="0.01"
+                            value={rates[n] ?? ''}
+                            onChange={(e) => onChange(n, e.target.value)}
+                        />
+                    </label>
+                ))}
+            </div>
+
+            <p className="mt-2 text-xs text-slate-500">
+                The 1-controller price is the station's headline rate, shown on the floor and on its QR page.
+            </p>
+        </div>
+    );
+}
 
 export default function Stations() {
     const { isAdmin } = useAuth();
@@ -52,7 +130,7 @@ export default function Stations() {
                         <>
                             <th className="ct-th">Station</th>
                             <th className="ct-th">Rate</th>
-                            <th className="ct-th">Extra / controller</th>
+                            <th className="ct-th">By controllers</th>
                             <th className="ct-th">Max</th>
                             <th className="ct-th">Status</th>
                             <th className="ct-th">QR</th>
@@ -67,7 +145,9 @@ export default function Stations() {
                                 <p className="text-xs text-slate-500">{station.type}</p>
                             </td>
                             <td className="ct-td tabular-nums">{money(station.hourly_rate)}</td>
-                            <td className="ct-td tabular-nums">{money(station.extra_controller_rate)}</td>
+                            <td className="ct-td">
+                                <RateChips rates={station.rates} />
+                            </td>
                             <td className="ct-td tabular-nums">{station.max_controllers}</td>
                             <td className="ct-td">
                                 {station.maintenance ? (
@@ -131,10 +211,9 @@ function StationModal({ station, onClose, onSaved }) {
         setForm({
             name: station.name ?? '',
             type: station.type ?? 'PS5',
-            hourly_rate: String(station.hourly_rate ?? '150'),
-            extra_controller_rate: String(station.extra_controller_rate ?? '0'),
             max_controllers: station.max_controllers ?? 4,
             is_active: station.is_active ?? true,
+            rates: ratesFrom(station),
         });
         setError(null);
     }
@@ -150,9 +229,22 @@ function StationModal({ station, onClose, onSaved }) {
         setBusy(true);
         setError(null);
 
+        const max = Number(form.max_controllers) || 1;
+
+        // Only the counts this station can actually reach are sent; the API
+        // refuses a list with a hole in it or an entry above the maximum.
+        const rates = {};
+        for (let n = 1; n <= max; n++) rates[n] = form.rates[n] ?? form.rates[1] ?? '0';
+
         const body = {
-            ...form,
-            max_controllers: Number(form.max_controllers),
+            name: form.name,
+            type: form.type,
+            is_active: form.is_active,
+            max_controllers: max,
+            // hourly_rate is the 1-controller price; the server keeps the two
+            // in step, but sending it keeps the payload self-describing.
+            hourly_rate: rates[1],
+            rates,
         };
 
         try {
@@ -182,19 +274,15 @@ function StationModal({ station, onClose, onSaved }) {
                     <Input required maxLength={50} value={form.type} onChange={set('type')} placeholder="PS5" />
                 </Field>
 
-                <div className="grid grid-cols-2 gap-3">
-                    <Field label="Hourly rate" hint="Covers the first controller.">
-                        <Input required type="number" min="0.01" step="0.01" value={form.hourly_rate} onChange={set('hourly_rate')} />
-                    </Field>
-
-                    <Field label="Extra / controller" hint="Added per hour, per extra pad.">
-                        <Input type="number" min="0" step="0.01" value={form.extra_controller_rate} onChange={set('extra_controller_rate')} />
-                    </Field>
-                </div>
-
                 <Field label="Max controllers" hint="1–8. A check-in above this is refused.">
                     <Input type="number" min={1} max={8} value={form.max_controllers} onChange={set('max_controllers')} />
                 </Field>
+
+                <RateTable
+                    max={Number(form.max_controllers) || 1}
+                    rates={form.rates}
+                    onChange={(n, value) => setForm((f) => ({ ...f, rates: { ...f.rates, [n]: value } }))}
+                />
 
                 <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={form.is_active} onChange={set('is_active')} className="h-4 w-4 rounded" />

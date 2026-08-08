@@ -7,6 +7,7 @@ use App\Http\Resources\Present;
 use App\Models\Booking;
 use App\Models\GameSession;
 use App\Models\Station;
+use App\Models\StationRate;
 use App\Services\AuditService;
 use App\Services\BillingService;
 use App\Services\StationTokenService;
@@ -29,7 +30,9 @@ class StationController extends Controller
 
     public function index(): JsonResponse
     {
-        $stations = $this->context->scope(Station::class)->orderBy('id')->get();
+        // with('rates') so the price list does not cost one query per
+        // station — the dashboard re-reads this list every five seconds.
+        $stations = $this->context->scope(Station::class)->with('rates')->orderBy('id')->get();
 
         return response()->json($stations->map(Present::station(...))->all());
     }
@@ -41,7 +44,6 @@ class StationController extends Controller
             'name' => $request->string('name')->value(),
             'type' => $request->string('type')->value(),
             'hourly_rate' => Money::str($request->input('hourly_rate')),
-            'extra_controller_rate' => Money::str($request->input('extra_controller_rate', 0)),
             'max_controllers' => (int) $request->input('max_controllers', 4),
             'is_active' => $request->boolean('is_active', true),
             'maintenance' => $request->boolean('maintenance', false),
@@ -50,6 +52,8 @@ class StationController extends Controller
 
         $station->qr_code_url = $this->qr->checkinUrl($station->id);
         $station->save();
+
+        $this->writeRates($station, $request->input('rates'));
 
         $this->audit->log('station_create', 'station', $station->id, sprintf(
             'Created station %s at %s/hr',
@@ -68,13 +72,17 @@ class StationController extends Controller
             'name', 'type', 'max_controllers', 'is_active', 'maintenance',
         ]));
 
-        foreach (['hourly_rate', 'extra_controller_rate'] as $field) {
-            if ($request->has($field)) {
-                $station->{$field} = Money::str($request->input($field));
-            }
+        if ($request->has('hourly_rate')) {
+            $station->hourly_rate = Money::str($request->input('hourly_rate'));
         }
 
         $station->save();
+
+        // Always rewrite when max_controllers moves, even with no rates sent:
+        // raising it would otherwise leave the new counts with no price at all.
+        if ($request->has('rates') || $request->has('max_controllers')) {
+            $this->writeRates($station, $request->input('rates'));
+        }
 
         $this->audit->log('station_update', 'station', $station->id, sprintf(
             'Updated station %s (%s/hr)',
@@ -82,7 +90,44 @@ class StationController extends Controller
             Money::str($station->hourly_rate),
         ));
 
-        return response()->json(Present::station($station));
+        return response()->json(Present::station($station->fresh()));
+    }
+
+    /**
+     * Replace a station's price list with one row per controller count.
+     *
+     * Rewritten wholesale rather than patched, so the table can never hold a
+     * rate for a count above the station's maximum — a price nobody can reach
+     * but which reappears the moment the maximum is raised again.
+     *
+     * A count with no rate supplied falls back to the one-controller price.
+     * That is only reachable when `rates` was omitted entirely; the request
+     * refuses a partial list.
+     */
+    private function writeRates(Station $station, ?array $rates): void
+    {
+        $rates ??= [];
+
+        $rows = [];
+
+        for ($n = 1; $n <= $station->max_controllers; $n++) {
+            $rows[] = [
+                'station_id' => $station->id,
+                'controllers' => $n,
+                'hourly_rate' => Money::str($rates[$n] ?? $rates[(string) $n] ?? $station->hourly_rate),
+            ];
+        }
+
+        StationRate::where('station_id', $station->id)->delete();
+        StationRate::insert($rows);
+
+        // The station's own hourly_rate is the one-controller price, and the
+        // two must not drift — it is the headline figure on the list and the
+        // check-in page.
+        if ($station->hourly_rate != $rows[0]['hourly_rate']) {
+            $station->hourly_rate = $rows[0]['hourly_rate'];
+            $station->save();
+        }
     }
 
     /**
@@ -194,7 +239,7 @@ class StationController extends Controller
             'name' => $station->name,
             'type' => $station->type,
             'hourly_rate' => Money::str($station->hourly_rate),
-            'extra_controller_rate' => Money::str($station->extra_controller_rate),
+            'rates' => $station->rateMap(),
             'max_controllers' => $station->max_controllers,
             'is_active' => (bool) $station->is_active,
             'maintenance' => (bool) $station->maintenance,
