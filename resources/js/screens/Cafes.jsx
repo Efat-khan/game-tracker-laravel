@@ -14,15 +14,22 @@ import {
     Modal,
     PageHeader,
     Pill,
+    Select,
 } from '../components/ui';
 
 export default function Cafes() {
     const { isSuperadmin, cafe, workInCafe } = useAuth();
     const { data, error, loading, reload } = useAsync(() => api.myCafes(), []);
     const [creating, setCreating] = useState(false);
+    const [editingId, setEditingId] = useState(null);
     const [actionError, setActionError] = useState(null);
 
     const cafes = data ?? [];
+
+    // Read the cafe being edited back out of the list rather than holding a
+    // copy, so a rename is reflected in the dialog's own title the moment it
+    // saves instead of leaving the old name sitting at the top.
+    const editing = cafes.find((row) => row.id === editingId) ?? null;
 
     async function setActive(row, isActive) {
         setActionError(null);
@@ -104,12 +111,16 @@ export default function Cafes() {
                                         {active ? 'Working here' : 'Work in this cafe'}
                                     </Button>
 
+                                    <Button size="sm" variant="outline" onClick={() => setEditingId(row.id)}>
+                                        Edit
+                                    </Button>
+
                                     {row.is_active ? (
-                                        <Button size="sm" variant="outline" onClick={() => setActive(row, false)}>
+                                        <Button size="sm" variant="ghost" onClick={() => setActive(row, false)}>
                                             Suspend
                                         </Button>
                                     ) : (
-                                        <Button size="sm" variant="outline" onClick={() => setActive(row, true)}>
+                                        <Button size="sm" variant="ghost" onClick={() => setActive(row, true)}>
                                             Restore
                                         </Button>
                                     )}
@@ -129,6 +140,7 @@ export default function Cafes() {
             )}
 
             <NewCafeModal open={creating} onClose={() => setCreating(false)} onDone={reload} />
+            <EditCafeModal cafe={editing} onClose={() => setEditingId(null)} onDone={reload} />
         </>
     );
 }
@@ -317,6 +329,350 @@ function FeatureSwitches({ cafe, onChanged, onError }) {
                 ))}
             </ul>
         </div>
+    );
+}
+
+/* ---------------------------------------------------------------- editing */
+
+/**
+ * Everything about a cafe that can change after it is opened: its details, and
+ * the accounts that run it.
+ *
+ * The accounts half talks to the ordinary /staff routes with `inCafe` set,
+ * which is how a superadmin acts inside a cafe for one request without
+ * switching the whole app into it. Those routes already refuse to demote or
+ * delete the last admin, so a cafe cannot be left with nobody able to
+ * administer it.
+ */
+function EditCafeModal({ cafe, onClose, onDone }) {
+    return (
+        <Modal open={Boolean(cafe)} title={`Edit ${cafe?.name ?? ''}`} onClose={onClose} wide>
+            {cafe && (
+                // Keyed on the cafe so opening a different one starts from its
+                // own values rather than inheriting the last one's form state.
+                <div className="space-y-7" key={cafe.id}>
+                    <CafeDetailsForm cafe={cafe} onDone={onDone} />
+                    <CafeAccounts cafe={cafe} />
+                </div>
+            )}
+        </Modal>
+    );
+}
+
+function CafeDetailsForm({ cafe, onDone }) {
+    const [form, setForm] = useState({ name: cafe.name, contact_email: cafe.contact_email ?? '' });
+    const [error, setError] = useState(null);
+    const [saved, setSaved] = useState(false);
+    const [busy, setBusy] = useState(false);
+
+    const set = (key) => (event) => {
+        setSaved(false);
+        setForm((f) => ({ ...f, [key]: event.target.value }));
+    };
+
+    async function submit(event) {
+        event.preventDefault();
+        setBusy(true);
+        setError(null);
+
+        try {
+            await api.updateCafe(cafe.id, { name: form.name, contact_email: form.contact_email || null });
+            setSaved(true);
+            onDone();
+        } catch (err) {
+            setError(err.firstError || err.message);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <form onSubmit={submit} className="space-y-4">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Details</h3>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Cafe name" hint="The web address under the name follows this.">
+                    <Input required maxLength={150} value={form.name} onChange={set('name')} />
+                </Field>
+
+                <Field label="Contact email">
+                    <Input type="email" maxLength={150} value={form.contact_email} onChange={set('contact_email')} />
+                </Field>
+            </div>
+
+            {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+
+            <div className="flex items-center justify-end gap-3">
+                {saved && !error && <span className="text-xs text-emerald-600 dark:text-emerald-400">Saved.</span>}
+                <Button type="submit" size="sm" busy={busy}>
+                    Save details
+                </Button>
+            </div>
+        </form>
+    );
+}
+
+function CafeAccounts({ cafe }) {
+    const { data, error, loading, reload } = useAsync(() => api.staff(cafe.id), [cafe.id]);
+    const [actionError, setActionError] = useState(null);
+    const [adding, setAdding] = useState(false);
+
+    const accounts = data ?? [];
+
+    async function run(work) {
+        setActionError(null);
+        try {
+            await work();
+            reload();
+        } catch (err) {
+            setActionError(err);
+        }
+    }
+
+    return (
+        <div>
+            <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Accounts</h3>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                        Who can sign in to this cafe. Changing an email, password or role signs that person out
+                        everywhere.
+                    </p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => setAdding((a) => !a)}>
+                    {adding ? 'Cancel' : 'Add account'}
+                </Button>
+            </div>
+
+            <ErrorNote error={error || actionError} onRetry={reload} />
+
+            {adding && (
+                <AddAccountForm
+                    cafeId={cafe.id}
+                    onDone={() => {
+                        setAdding(false);
+                        reload();
+                    }}
+                />
+            )}
+
+            {loading && !data ? (
+                <Loading />
+            ) : (
+                <ul className="space-y-2">
+                    {accounts.map((account) => (
+                        <AccountRow
+                            key={account.id}
+                            account={account}
+                            cafeId={cafe.id}
+                            onRun={run}
+                            isLastAdmin={
+                                account.role === 'admin' && accounts.filter((a) => a.role === 'admin').length === 1
+                            }
+                        />
+                    ))}
+
+                    {accounts.length === 0 && (
+                        <li className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-700">
+                            This cafe has no accounts — nobody can sign in to it.
+                        </li>
+                    )}
+                </ul>
+            )}
+
+        </div>
+    );
+}
+
+function AccountRow({ account, cafeId, onRun, isLastAdmin }) {
+    const [editing, setEditing] = useState(false);
+    const [confirming, setConfirming] = useState(false);
+    const [email, setEmail] = useState(account.email);
+    const [password, setPassword] = useState('');
+
+    async function save(event) {
+        event.preventDefault();
+
+        const body = {};
+        if (email.trim() && email.trim() !== account.email) body.email = email.trim();
+        if (password) body.password = password;
+
+        if (Object.keys(body).length === 0) {
+            setEditing(false);
+            return;
+        }
+
+        await onRun(() => api.updateStaff(account.id, body, cafeId));
+        setPassword('');
+        setEditing(false);
+    }
+
+    return (
+        <li className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+            {editing ? (
+                <form onSubmit={save} className="space-y-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                        <Field label="Email">
+                            <Input required type="email" maxLength={150} value={email} onChange={(e) => setEmail(e.target.value)} />
+                        </Field>
+                        <Field label="New password" hint="Leave blank to keep the current one.">
+                            <Input
+                                type="password"
+                                minLength={6}
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                autoComplete="new-password"
+                            />
+                        </Field>
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                                setEmail(account.email);
+                                setPassword('');
+                                setEditing(false);
+                            }}
+                        >
+                            Cancel
+                        </Button>
+                        <Button type="submit" size="sm">
+                            Save
+                        </Button>
+                    </div>
+                </form>
+            ) : (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{account.email}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                            {account.role === 'admin' ? 'Admin' : 'Staff'} · opened {dateTime(account.created_at)}
+                        </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                            Change
+                        </Button>
+
+                        {/* The last admin cannot be demoted — the API refuses
+                            it too, and a cafe with no admin is a cafe only the
+                            platform owner can fix. */}
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={isLastAdmin}
+                            title={isLastAdmin ? 'The last admin cannot be demoted.' : undefined}
+                            onClick={() =>
+                                onRun(() =>
+                                    api.updateStaff(
+                                        account.id,
+                                        { role: account.role === 'admin' ? 'staff' : 'admin' },
+                                        cafeId,
+                                    ),
+                                )
+                            }
+                        >
+                            Make {account.role === 'admin' ? 'staff' : 'admin'}
+                        </Button>
+
+                        {confirming ? (
+                            <>
+                                <Button
+                                    size="sm"
+                                    variant="danger"
+                                    onClick={async () => {
+                                        await onRun(() => api.deleteStaff(account.id, cafeId));
+                                        setConfirming(false);
+                                    }}
+                                >
+                                    Really delete
+                                </Button>
+                                <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>
+                                    Keep
+                                </Button>
+                            </>
+                        ) : (
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                disabled={isLastAdmin}
+                                onClick={() => setConfirming(true)}
+                            >
+                                Delete
+                            </Button>
+                        )}
+                    </div>
+                </div>
+            )}
+        </li>
+    );
+}
+
+/** Rendered inline inside the edit dialog — a modal on a modal would take two
+ *  presses of Escape to get out of. */
+function AddAccountForm({ cafeId, onDone }) {
+    const [form, setForm] = useState({ email: '', password: '', role: 'admin' });
+    const [error, setError] = useState(null);
+    const [busy, setBusy] = useState(false);
+
+    const set = (key) => (event) => setForm((f) => ({ ...f, [key]: event.target.value }));
+
+    async function submit(event) {
+        event.preventDefault();
+        setBusy(true);
+        setError(null);
+
+        try {
+            await api.createStaff(form, cafeId);
+            onDone();
+        } catch (err) {
+            setError(err.firstError || err.message);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <form
+            onSubmit={submit}
+            className="mb-3 space-y-3 rounded-xl border border-indigo-300 bg-indigo-50/50 p-3 dark:border-indigo-500/40 dark:bg-indigo-500/5"
+        >
+            <div className="grid gap-3 sm:grid-cols-3">
+                <Field label="Email" hint="Unused platform-wide.">
+                    <Input required autoFocus type="email" maxLength={150} value={form.email} onChange={set('email')} />
+                </Field>
+
+                <Field label="Password" hint="At least 6 characters.">
+                    <Input
+                        required
+                        type="password"
+                        minLength={6}
+                        value={form.password}
+                        onChange={set('password')}
+                        autoComplete="new-password"
+                    />
+                </Field>
+
+                <Field label="Role">
+                    <Select value={form.role} onChange={set('role')}>
+                        <option value="admin">Admin</option>
+                        <option value="staff">Staff</option>
+                    </Select>
+                </Field>
+            </div>
+
+            {error && <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+
+            <div className="flex justify-end">
+                <Button type="submit" size="sm" busy={busy}>
+                    Add account
+                </Button>
+            </div>
+        </form>
     );
 }
 

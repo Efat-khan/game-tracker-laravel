@@ -89,6 +89,118 @@ class CafeManagementTest extends TestCase
             ->assertOk()->assertJson(['name' => 'Renamed Cafe']);
     }
 
+    public function test_the_slug_follows_a_rename(): void
+    {
+        // It is printed under the name on every cafe card, so a slug left
+        // behind reads as a stale record.
+        $this->apiPatch($this->superadmin, "/api/cafes/{$this->cafe->id}", ['name' => 'Neon Arena'])
+            ->assertOk()->assertJson(['slug' => 'neon-arena']);
+    }
+
+    public function test_renaming_a_cafe_to_its_own_name_does_not_walk_the_slug(): void
+    {
+        // The uniqueness check has to ignore the row being saved, or a save
+        // with the name unchanged collides with itself and lands on -2.
+        $this->apiPatch($this->superadmin, "/api/cafes/{$this->cafe->id}", [
+            'name' => 'My Gaming Cafe',
+            'contact_email' => 'hello@example.com',
+        ])->assertOk()->assertJson(['slug' => 'my-gaming-cafe', 'contact_email' => 'hello@example.com']);
+    }
+
+    public function test_a_rename_still_cannot_take_another_cafes_slug(): void
+    {
+        $other = $this->makeCafe('Neon Arena');
+
+        $this->apiPatch($this->superadmin, "/api/cafes/{$this->cafe->id}", ['name' => 'Neon Arena'])
+            ->assertOk()->assertJson(['slug' => 'neon-arena-2']);
+
+        $this->assertSame('neon-arena', $other->fresh()->slug);
+    }
+
+    public function test_a_superadmin_can_change_a_cafes_contact_email(): void
+    {
+        $this->apiPatch($this->superadmin, "/api/cafes/{$this->cafe->id}", ['contact_email' => 'new@example.com'])
+            ->assertOk()->assertJson(['contact_email' => 'new@example.com']);
+
+        $this->apiPatch($this->superadmin, "/api/cafes/{$this->cafe->id}", ['contact_email' => null])
+            ->assertOk()->assertJson(['contact_email' => null]);
+    }
+
+    /* ------------------------- editing a cafe's accounts from the outside */
+
+    public function test_a_superadmin_can_manage_another_cafes_accounts_without_switching_into_it(): void
+    {
+        // This is what the Edit dialog on the Cafes screen does: it names the
+        // cafe on the request rather than switching the whole app into it.
+        $accounts = $this->apiGet($this->superadmin, '/api/staff', $this->cafe)->assertOk()->json();
+        $this->assertCount(1, $accounts);
+        $this->assertSame('admin@example.com', $accounts[0]['email']);
+
+        $this->apiPatch(
+            $this->superadmin,
+            "/api/staff/{$this->admin->id}",
+            ['email' => 'newadmin@example.com'],
+            $this->cafe,
+        )->assertOk()->assertJson(['email' => 'newadmin@example.com']);
+
+        $this->assertSame('newadmin@example.com', $this->admin->fresh()->email);
+    }
+
+    public function test_changing_an_admins_email_signs_them_out(): void
+    {
+        $token = $this->tokenFor($this->admin);
+
+        $this->apiPatch(
+            $this->superadmin,
+            "/api/staff/{$this->admin->id}",
+            ['password' => 'brand-new-one'],
+            $this->cafe,
+        )->assertOk();
+
+        $this->getJson('/api/stations', ['Authorization' => "Bearer {$token}"])->assertUnauthorized();
+    }
+
+    public function test_the_owner_cannot_leave_a_cafe_without_an_admin(): void
+    {
+        // The cafe would then be one only the platform owner could fix.
+        $this->apiDelete($this->superadmin, "/api/staff/{$this->admin->id}", $this->cafe)
+            ->assertStatus(400);
+
+        $this->apiPatch(
+            $this->superadmin,
+            "/api/staff/{$this->admin->id}",
+            ['role' => 'staff'],
+            $this->cafe,
+        )->assertStatus(400);
+    }
+
+    public function test_a_superadmin_can_add_an_admin_to_another_cafe(): void
+    {
+        $this->apiPost($this->superadmin, '/api/staff', [
+            'email' => 'second@example.com',
+            'password' => 'secret123',
+            'role' => 'admin',
+        ], $this->cafe)->assertCreated();
+
+        $this->assertSame(
+            $this->cafe->id,
+            AdminUser::where('email', 'second@example.com')->value('cafe_id'),
+        );
+    }
+
+    public function test_an_admin_of_one_cafe_cannot_edit_another_cafes_accounts(): void
+    {
+        $other = $this->makeCafe('Other Cafe');
+        $theirs = $this->makeUser($other, 'admin', 'other@example.com');
+
+        // X-Cafe-Id is ignored for a cafe-bound account, so this resolves
+        // inside their OWN cafe, where that id does not exist.
+        $this->apiPatch($this->admin, "/api/staff/{$theirs->id}", ['email' => 'stolen@example.com'], $other)
+            ->assertNotFound();
+
+        $this->assertSame('other@example.com', $theirs->fresh()->email);
+    }
+
     public function test_an_admin_cannot_create_or_suspend_a_cafe(): void
     {
         $this->apiPost($this->admin, '/api/cafes', [

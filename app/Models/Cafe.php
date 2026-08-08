@@ -28,14 +28,18 @@ class Cafe extends Model
 
     /**
      * Turn a cafe name into a unique slug, appending -2, -3 … on collision.
+     *
+     * `$ignoreId` is the cafe being renamed. Without it, re-saving a cafe under
+     * a name it already has would collide with its own row and walk the slug on
+     * to `-2` for no reason.
      */
-    public static function uniqueSlug(string $name): string
+    public static function uniqueSlug(string $name, ?int $ignoreId = null): string
     {
         $base = substr(str($name)->slug()->value() ?: 'cafe', 0, 55);
         $slug = $base;
         $n = 2;
 
-        while (static::where('slug', $slug)->exists()) {
+        while (static::where('slug', $slug)->whereKeyNot($ignoreId)->exists()) {
             $slug = $base.'-'.$n;
             $n++;
         }

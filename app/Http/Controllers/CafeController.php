@@ -86,6 +86,14 @@ class CafeController extends Controller
         }
 
         $cafe->fill($request->safe()->only(['name', 'contact_email', 'is_active']));
+
+        // The slug follows the name. It is shown under the name on every cafe
+        // card, so leaving it behind after a rename reads as a stale record —
+        // and nothing in the app looks a cafe up by it.
+        if ($cafe->isDirty('name')) {
+            $cafe->slug = Cafe::uniqueSlug($cafe->name, $cafe->id);
+        }
+
         $cafe->save();
 
         return response()->json(Present::cafe($cafe));

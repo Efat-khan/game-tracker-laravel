@@ -100,7 +100,7 @@ php artisan serve
 | **Bookings** | Upcoming reservations; Arrived turns one into a live session. |
 | **Shifts** | Live totals split by method, a Drawer panel showing the expected-cash arithmetic line by line, cash in/out and close. |
 | **Analytics** | Income and hours charts, gross-profit tiles, utilization bars, a 7 × 24 peak-hours heatmap, and the top station and customer rankings. |
-| **Logs / Staff / Settings / Cafes** | The activity log, accounts, billing rules with a worked example under each control, and cafe onboarding. |
+| **Logs / Staff / Settings / Cafes** | The activity log, accounts, billing rules with a worked example under each control, and cafe onboarding. **Edit** on a cafe card opens its details and its accounts together — rename it, change its contact email, change an account's email or password, switch a role, add an account or remove one. |
 | **Check-in** *(public)* | Phone-shaped. Controller picker showing the effective rate as it changes. If a session is already running it shows the clock and cost — and deliberately **no stop button**. |
 
 The layout follows a trading-desk pattern. The left sidebar shows icons **and**
@@ -156,6 +156,28 @@ It answers 403 rather than the 404 the tenancy rules use. Those exist so a
 lookup cannot confirm that *another tenant's* record exists; here the caller is
 asking about their own cafe, and "your plan does not include this" is the
 honest, actionable answer.
+
+### Editing a cafe
+
+Everything about a cafe stays changeable after it is opened. **Edit** on its
+card opens one dialog holding both halves: the details (name, contact email)
+and the accounts that run it — change an email or password, switch a role
+between admin and staff, add an account, remove one.
+
+Two notes on how it works:
+
+- **The slug follows the name.** It is printed under the name on every cafe
+  card, so leaving it behind after a rename reads as a stale record. Nothing in
+  the app looks a cafe up by it. The uniqueness check ignores the row being
+  saved, or re-saving a cafe under a name it already has would collide with
+  itself and walk the slug on to `-2`.
+- **The accounts half uses the ordinary `/staff` routes**, with the cafe named
+  on the request via `X-Cafe-Id` rather than the platform owner switching the
+  whole app into it. That reuses the guards already there: the last admin
+  cannot be demoted or deleted, so a cafe is never left with nobody able to
+  administer it, and any email, password or role change bumps `token_version`
+  and signs that person out everywhere. The header is ignored for a cafe-bound
+  account, so an admin cannot reach another cafe's accounts by sending it.
 
 ### Branding
 
@@ -213,7 +235,7 @@ off under `prefers-reduced-motion`.
 php artisan test
 ```
 
-**228 feature tests, all green.** They hit real HTTP routes, each against a
+**237 feature tests, all green.** They hit real HTTP routes, each against a
 fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
 without a MySQL server). The migrations are written to compile identically on
 both; the MySQL DDL is what the schema section below describes.
@@ -223,7 +245,7 @@ both; the MySQL DDL is what the schema section below describes.
 | Billing | 27 |
 | Tenancy | 27 |
 | Security | 20 |
-| Cafe management, staff, settings | 19 |
+| Cafe management, staff, settings | 28 |
 | Permissions | 18 |
 | Analytics | 17 |
 | Bookings | 17 |

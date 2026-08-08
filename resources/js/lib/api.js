@@ -86,14 +86,18 @@ function buildQuery(params) {
     return qs ? `?${qs}` : '';
 }
 
-async function request(method, path, { body, params, raw, file } = {}) {
+async function request(method, path, { body, params, raw, file, inCafe } = {}) {
     const headers = { Accept: 'application/json' };
     const token = getToken();
 
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const cafe = getActiveCafe();
-    if (cafe?.id) headers['X-Cafe-Id'] = String(cafe.id);
+    // `inCafe` lets a superadmin act inside a named cafe for one request without
+    // switching the whole app into it — editing another cafe's accounts from
+    // the Cafes screen, say. Admins and staff are pinned to their own cafe by
+    // their token and the server ignores the header for them either way.
+    const cafeId = inCafe ?? getActiveCafe()?.id;
+    if (cafeId) headers['X-Cafe-Id'] = String(cafeId);
 
     let requestBody;
 
@@ -276,9 +280,14 @@ export const api = {
     settings: () => get('/settings'),
     updateSettings: (body) => patch('/settings', body),
 
-    staff: () => get('/staff'),
-    createStaff: (body) => post('/staff', body),
-    updateStaff: (id, body) => patch(`/staff/${id}`, body),
-    revokeStaff: (id) => post(`/staff/${id}/revoke`),
-    deleteStaff: (id) => del(`/staff/${id}`),
+    /*
+     * `inCafe` is optional and only a superadmin can use it — the Cafes screen
+     * edits another cafe's accounts through these without switching into it.
+     * Everyone else omits it and works in the cafe their token names.
+     */
+    staff: (inCafe) => request('GET', '/staff', { inCafe }),
+    createStaff: (body, inCafe) => request('POST', '/staff', { body, inCafe }),
+    updateStaff: (id, body, inCafe) => request('PATCH', `/staff/${id}`, { body, inCafe }),
+    revokeStaff: (id, inCafe) => request('POST', `/staff/${id}/revoke`, { body: {}, inCafe }),
+    deleteStaff: (id, inCafe) => request('DELETE', `/staff/${id}`, { inCafe }),
 };
