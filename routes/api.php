@@ -8,6 +8,7 @@ use App\Http\Controllers\BrandingController;
 use App\Http\Controllers\CafeController;
 use App\Http\Controllers\CheckinController;
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\ExpenseController;
 use App\Http\Controllers\FeatureController;
 use App\Http\Controllers\InvoiceController;
 use App\Http\Controllers\PackageController;
@@ -129,6 +130,12 @@ Route::middleware(['auth:cafetrack', 'cafe'])->group(function () {
     Route::post('/shifts/{id}/close', [ShiftController::class, 'close'])->whereNumber('id');
     Route::post('/shifts/{id}/cash', [ShiftController::class, 'cash'])->whereNumber('id');
 
+    /* ---- Expenses ---------------------------------------------------- */
+    // Staff record them — they are the ones sent out for change and batteries.
+    // Deleting one is admin, below, because it moves the drawer.
+    Route::get('/expenses', [ExpenseController::class, 'index']);
+    Route::post('/expenses', [ExpenseController::class, 'store']);
+
     /* ---- Analytics --------------------------------------------------- */
     Route::get('/analytics/daily-income', [AnalyticsController::class, 'dailyIncome']);
     Route::get('/analytics/top-stations', [AnalyticsController::class, 'topStations']);
@@ -170,6 +177,8 @@ Route::middleware(['auth:cafetrack', 'cafe'])->group(function () {
         });
 
         Route::post('/customers/{id}/adjust', [CustomerController::class, 'adjust'])->whereNumber('id');
+
+        Route::delete('/expenses/{id}', [ExpenseController::class, 'destroy'])->whereNumber('id');
 
         Route::get('/analytics/staff', [AnalyticsController::class, 'staff']);
 

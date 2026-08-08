@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\AdminUser;
 use App\Models\Cafe;
 use App\Models\Customer;
+use App\Models\Expense;
 use App\Models\GameSession;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
@@ -48,6 +49,7 @@ class DatabaseSeeder extends Seeder
         $this->tiers($cafe);
         $customers = $this->customers($cafe);
         $this->history($cafe, $stations, $customers, $products);
+        $this->expenses($cafe);
 
         $this->command?->info('CafeTrack demo data seeded.');
     }
@@ -139,6 +141,40 @@ class DatabaseSeeder extends Seeder
 
             return $station->load('rates');
         });
+    }
+
+    /**
+     * A month of running costs, so the summary sheets have something to net
+     * off. None are linked to a shift: they are historical, and the drawer
+     * they came out of was counted long ago.
+     */
+    private function expenses(Cafe $cafe): void
+    {
+        $rows = [
+            [28, 'rent', '18000.00', 'bank', 'Monthly rent'],
+            [28, 'salary', '32000.00', 'bank', 'Staff wages'],
+            [21, 'utilities', '4200.00', 'bank', 'Electricity'],
+            [21, 'internet', '3500.00', 'bank', 'Fibre line'],
+            [14, 'stock', '2650.00', 'cash', 'Soft drinks and crisps'],
+            [11, 'maintenance', '1800.00', 'cash', 'PS5 fan cleaning'],
+            [7, 'equipment', '5400.00', 'phone_payment', 'Two replacement controllers'],
+            [5, 'stock', '1950.00', 'cash', 'Snacks restock'],
+            [3, 'transport', '600.00', 'cash', 'Courier for the wheel pedals'],
+            [1, 'marketing', '2500.00', 'phone_payment', 'Boosted a launch post'],
+        ];
+
+        foreach ($rows as [$daysAgo, $category, $amount, $method, $note]) {
+            Expense::create([
+                'cafe_id' => $cafe->id,
+                'category' => $category,
+                'amount' => $amount,
+                'payment_method' => $method,
+                'note' => $note,
+                'spent_on' => now()->subDays($daysAgo)->toDateString(),
+                'actor_email' => 'admin@cafetrack.test',
+                'created_at' => now()->subDays($daysAgo),
+            ]);
+        }
     }
 
     /** @return Collection<int, Product> */

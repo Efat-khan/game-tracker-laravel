@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Expense;
 use App\Models\GameSession;
 use App\Models\Invoice;
 use App\Models\Shift;
@@ -336,7 +337,12 @@ class AnalyticsService
 
         return $this->summaryFor($cafeId, $day, $day->addDay()) + [
             'date' => $day->format('Y-m-d'),
-            'expenses' => $this->movements($cafeId, $day, $day->addDay()),
+            // The ledger for the day, whatever each was paid by — the drawer is
+            // only one of the ways money leaves.
+            'expenses' => $this->expenseRows($cafeId, $day, $day->addDay()),
+            // The till's own ins and outs, which is a different question: it
+            // includes banking the takings, which costs the cafe nothing.
+            'drawer' => $this->movements($cafeId, $day, $day->addDay()),
         ];
     }
 
@@ -358,13 +364,13 @@ class AnalyticsService
             ->get()
             ->keyBy('d');
 
-        $spend = DB::table('cash_movements')
-            ->join('shifts', 'shifts.id', '=', 'cash_movements.shift_id')
-            ->where('shifts.cafe_id', $cafeId)
-            ->where('cash_movements.kind', 'out')
-            ->where('cash_movements.created_at', '>=', $start)
-            ->where('cash_movements.created_at', '<', $end)
-            ->selectRaw('DATE(cash_movements.created_at) as d, SUM(cash_movements.amount) as spent')
+        // Grouped on spent_on, never on created_at: a bill entered late still
+        // belongs to the day it was incurred.
+        $spend = DB::table('expenses')
+            ->where('expenses.cafe_id', $cafeId)
+            ->where('expenses.spent_on', '>=', $start->toDateString())
+            ->where('expenses.spent_on', '<', $end->toDateString())
+            ->selectRaw('DATE(expenses.spent_on) as d, SUM(expenses.amount) as spent')
             ->groupBy('d')
             ->pluck('spent', 'd');
 
@@ -430,16 +436,26 @@ class AnalyticsService
         $minutes = (int) $this->invoicesBetween($cafeId, $from, $to)->sum('invoices.duration_minutes');
         $sessions = (int) $this->invoicesBetween($cafeId, $from, $to)->count();
 
-        $out = $this->dec($this->movementTotal($cafeId, $from, $to, 'out'));
+        $out = $this->dec(
+            DB::table('expenses')
+                ->where('expenses.cafe_id', $cafeId)
+                ->where('expenses.spent_on', '>=', $from->toDateString())
+                ->where('expenses.spent_on', '<', $to->toDateString())
+                ->sum('expenses.amount')
+        );
+
         $in = $this->dec($this->movementTotal($cafeId, $from, $to, 'in'));
 
         return [
             'devices' => $byDevice,
+            'expenses_by_category' => $this->expensesByCategory($cafeId, $from, $to),
             'totals' => [
                 'sessions' => $sessions,
                 'hours' => $this->hours($minutes),
                 // Every non-void invoice, whether it has been settled or not.
                 'income' => Money::str($income),
+                // Every expense in the ledger for the window, however it was
+                // paid — not only the ones that came out of the till.
                 'expenses' => Money::str($out),
                 'cash_in' => Money::str($in),
                 'net' => Money::str($income->minus($out)),
@@ -458,6 +474,53 @@ class AnalyticsService
             ->where('invoices.status', '!=', 'void')
             ->where('invoices.created_at', '>=', $from)
             ->where('invoices.created_at', '<', $to);
+    }
+
+    /** Where the money went, biggest category first. */
+    private function expensesByCategory(int $cafeId, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        return DB::table('expenses')
+            ->where('expenses.cafe_id', $cafeId)
+            ->where('expenses.spent_on', '>=', $from->toDateString())
+            ->where('expenses.spent_on', '<', $to->toDateString())
+            ->selectRaw('expenses.category, COUNT(*) as entries, SUM(expenses.amount) as total')
+            ->groupBy('expenses.category')
+            ->orderByDesc('total')
+            ->get()
+            ->map(fn ($r) => [
+                'category' => $r->category,
+                'label' => Expense::CATEGORIES[$r->category] ?? $r->category,
+                'entries' => (int) $r->entries,
+                'total' => Money::str($this->dec($r->total)),
+            ])
+            ->all();
+    }
+
+    /**
+     * The ledger itself, for a day.
+     *
+     * Half-open on the raw column rather than a whereBetween on two date
+     * strings: `spent_on` is stored with a zeroed time, so `<= '2026-08-08'`
+     * excludes '2026-08-08 00:00:00' and the day comes back empty.
+     */
+    private function expenseRows(int $cafeId, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        return Expense::where('cafe_id', $cafeId)
+            ->where('spent_on', '>=', $from)
+            ->where('spent_on', '<', $to)
+            ->orderBy('id')
+            ->get()
+            ->map(fn (Expense $e) => [
+                'id' => $e->id,
+                'category' => $e->category,
+                'label' => $e->categoryLabel(),
+                'amount' => Money::str($e->amount),
+                'payment_method' => $e->payment_method,
+                'note' => $e->note,
+                'actor_email' => $e->actor_email,
+                'spent_on' => $e->spent_on?->format('Y-m-d'),
+            ])
+            ->all();
     }
 
     /** Cash that left or entered the drawer, itemised. */

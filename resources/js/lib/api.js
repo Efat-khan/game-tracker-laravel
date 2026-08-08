@@ -189,6 +189,12 @@ export const api = {
     uploadBranding: (asset, file) => request('POST', `/branding/${asset}`, { file }),
     removeBranding: (asset) => del(`/branding/${asset}`),
 
+    /* ---- expenses ------------------------------------------------------ */
+    expenses: (params) => get('/expenses', params),
+    createExpense: (body) => post('/expenses', body),
+    // Admin only, and refused once the shift it came out of has been counted.
+    deleteExpense: (id) => del(`/expenses/${id}`),
+
     /* ---- optional modules ---------------------------------------------- */
     // What this cafe may use. The sidebar reads it.
     features: () => get('/features'),

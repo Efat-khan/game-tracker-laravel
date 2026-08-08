@@ -407,23 +407,77 @@ class AnalyticsTest extends TestCase
         $this->assertSame(1, $devices['PC']['sessions']);
     }
 
-    public function test_cash_paid_out_of_the_drawer_is_the_days_expense(): void
+    public function test_an_expense_comes_off_the_days_income(): void
     {
         $this->invoice();
-        $shift = $this->openShift();
+        $this->openShift();
 
-        $this->apiPost($this->admin, "/api/shifts/{$shift}/cash", [
-            'kind' => 'out', 'amount' => '50', 'reason' => 'Snacks restock',
+        $this->apiPost($this->admin, '/api/expenses', [
+            'category' => 'stock', 'amount' => '50', 'payment_method' => 'cash', 'note' => 'Snacks restock',
         ])->assertCreated();
 
         $body = $this->apiGet($this->admin, '/api/analytics/daily-summary')->assertOk()->json();
 
         $this->assertSame('50.00', $body['totals']['expenses']);
-        // Net is income less what left the drawer.
         $this->assertSame('100.00', $body['totals']['net']);
         $this->assertCount(1, $body['expenses']);
-        $this->assertSame('Snacks restock', $body['expenses'][0]['reason']);
+        $this->assertSame('Snacks restock', $body['expenses'][0]['note']);
         $this->assertSame('admin@example.com', $body['expenses'][0]['actor_email']);
+    }
+
+    public function test_an_expense_not_paid_in_cash_still_counts(): void
+    {
+        // The whole point of the ledger: rent by bank transfer never touches
+        // the till, and used to be invisible to every report.
+        $this->invoice();
+
+        $this->apiPost($this->admin, '/api/expenses', [
+            'category' => 'rent', 'amount' => '75', 'payment_method' => 'bank',
+        ])->assertCreated();
+
+        $this->apiGet($this->admin, '/api/analytics/daily-summary')
+            ->assertOk()
+            ->assertJsonPath('totals.expenses', '75.00')
+            ->assertJsonPath('totals.net', '75.00');
+    }
+
+    public function test_a_bare_drawer_movement_is_not_an_expense(): void
+    {
+        // Banking the takings empties the till without costing the cafe
+        // anything. It belongs to the drawer, not to the ledger.
+        $this->invoice();
+        $shift = $this->openShift();
+
+        $this->apiPost($this->admin, "/api/shifts/{$shift}/cash", [
+            'kind' => 'out', 'amount' => '500', 'reason' => 'Banked the takings',
+        ])->assertCreated();
+
+        $body = $this->apiGet($this->admin, '/api/analytics/daily-summary')->assertOk()->json();
+
+        $this->assertSame('0.00', $body['totals']['expenses']);
+        $this->assertSame('150.00', $body['totals']['net']);
+        $this->assertSame([], $body['expenses']);
+        // It is still visible as what it is — a movement of the drawer.
+        $this->assertCount(1, $body['drawer']);
+        $this->assertSame('Banked the takings', $body['drawer'][0]['reason']);
+    }
+
+    public function test_the_summary_breaks_expenses_down_by_category(): void
+    {
+        $this->openShift();
+
+        foreach ([['stock', '40'], ['stock', '60'], ['utilities', '30']] as [$category, $amount]) {
+            $this->apiPost($this->admin, '/api/expenses', [
+                'category' => $category, 'amount' => $amount, 'payment_method' => 'cash',
+            ])->assertCreated();
+        }
+
+        $rows = collect($this->apiGet($this->admin, '/api/analytics/daily-summary')->assertOk()
+            ->json('expenses_by_category'))->keyBy('category');
+
+        $this->assertSame('100.00', $rows['stock']['total']);
+        $this->assertSame(2, $rows['stock']['entries']);
+        $this->assertSame('30.00', $rows['utilities']['total']);
     }
 
     public function test_cash_paid_in_is_not_counted_as_an_expense(): void
@@ -488,10 +542,10 @@ class AnalyticsTest extends TestCase
     public function test_the_monthly_summary_nets_expenses_off_the_day_they_fell_on(): void
     {
         $this->invoice();
-        $shift = $this->openShift();
+        $this->openShift();
 
-        $this->apiPost($this->admin, "/api/shifts/{$shift}/cash", [
-            'kind' => 'out', 'amount' => '40', 'reason' => 'Batteries',
+        $this->apiPost($this->admin, '/api/expenses', [
+            'category' => 'equipment', 'amount' => '40', 'payment_method' => 'cash', 'note' => 'Batteries',
         ])->assertCreated();
 
         $body = $this->apiGet($this->admin, '/api/analytics/monthly-summary')->assertOk()->json();
@@ -529,16 +583,13 @@ class AnalyticsTest extends TestCase
             ->assertJsonPath('totals.income', '0.00');
     }
 
-    public function test_another_cafes_cash_movements_stay_out_of_the_expenses(): void
+    public function test_another_cafes_expenses_stay_out_of_the_summary(): void
     {
         $other = $this->makeCafe('Other Cafe');
         $otherAdmin = $this->makeUser($other, 'admin', 'other@example.com');
 
-        $shift = $this->apiPost($otherAdmin, '/api/shifts/open', ['opening_float' => '500'])
-            ->assertCreated()->json('id');
-
-        $this->apiPost($otherAdmin, "/api/shifts/{$shift}/cash", [
-            'kind' => 'out', 'amount' => '999', 'reason' => 'Not ours',
+        $this->apiPost($otherAdmin, '/api/expenses', [
+            'category' => 'rent', 'amount' => '999', 'payment_method' => 'bank',
         ])->assertCreated();
 
         $body = $this->apiGet($this->admin, '/api/analytics/daily-summary')->assertOk()->json();

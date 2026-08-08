@@ -17,6 +17,7 @@ import Products from './screens/Products';
 import Bookings from './screens/Bookings';
 import Customers from './screens/Customers';
 import Shifts from './screens/Shifts';
+import Expenses from './screens/Expenses';
 import Loyalty from './screens/Loyalty';
 import Analytics from './screens/Analytics';
 import Reports from './screens/Reports';
@@ -34,6 +35,7 @@ const ROUTES = [
     ['/bookings', Bookings],
     ['/customers', Customers],
     ['/shifts', Shifts],
+    ['/expenses', Expenses],
     ['/loyalty', Loyalty],
     ['/analytics', Analytics],
     ['/summary', Reports],

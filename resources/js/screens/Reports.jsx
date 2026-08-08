@@ -79,7 +79,12 @@ function DailySheet() {
 
                     <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                         <DeviceTable rows={data?.devices} />
-                        <MovementTable rows={data?.expenses} />
+                        <ExpenseTable rows={data?.expenses} />
+                    </div>
+
+                    <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                        <CategoryTable rows={data?.expenses_by_category} />
+                        <MovementTable rows={data?.drawer} />
                     </div>
                 </>
             )}
@@ -174,8 +179,9 @@ function MonthlySheet() {
                         </Table>
                     </Card>
 
-                    <div className="mt-4">
+                    <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
                         <DeviceTable rows={data?.devices} title="By device, this month" />
+                        <CategoryTable rows={data?.expenses_by_category} title="Where the money went" />
                     </div>
                 </>
             )}
@@ -198,7 +204,7 @@ function TotalsRow({ totals }) {
                     label="Expenses"
                     value={money(totals.expenses)}
                     tone={Number(totals.expenses) > 0 ? 'bad' : 'default'}
-                    hint="Cash paid out of the drawer"
+                    hint="Every expense, however it was paid"
                 />
                 <Stat label="Net" value={money(totals.net)} tone={net < 0 ? 'bad' : 'good'} hint="Income − expenses" />
                 <Stat label="Hours played" value={totals.hours} hint="Across every device" />
@@ -267,10 +273,88 @@ function DeviceTable({ rows, title = 'By device' }) {
     );
 }
 
+/** The ledger for the day, whatever each expense was paid by. */
+function ExpenseTable({ rows }) {
+    const list = rows ?? [];
+
+    return (
+        <Card className="overflow-hidden">
+            <div className="px-5 py-4">
+                <h2 className="text-sm font-semibold">Expenses</h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                    Recorded on the <span className="font-medium">Expenses</span> screen.
+                </p>
+            </div>
+
+            <Table
+                colSpan={4}
+                empty={list.length === 0 ? 'Nothing spent.' : null}
+                head={
+                    <>
+                        <th className="ct-th">Category</th>
+                        <th className="ct-th">Note</th>
+                        <th className="ct-th">Paid by</th>
+                        <th className="ct-th text-right">Amount</th>
+                    </>
+                }
+            >
+                {list.map((row) => (
+                    <tr key={row.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                        <td className="ct-td">
+                            <Pill>{row.label}</Pill>
+                        </td>
+                        <td className="ct-td">
+                            <p className="truncate">{row.note || '—'}</p>
+                            <p className="text-xs text-slate-500">{row.actor_email}</p>
+                        </td>
+                        <td className="ct-td text-xs">{row.payment_method.replace('_', ' ')}</td>
+                        <td className="ct-td text-right font-semibold tabular-nums text-rose-600 dark:text-rose-400">
+                            −{money(row.amount)}
+                        </td>
+                    </tr>
+                ))}
+            </Table>
+        </Card>
+    );
+}
+
+/** Where the money went, biggest first. */
+function CategoryTable({ rows, title = 'By category' }) {
+    const list = rows ?? [];
+
+    return (
+        <Card className="overflow-hidden">
+            <div className="px-5 py-4">
+                <h2 className="text-sm font-semibold">{title}</h2>
+                <p className="mt-0.5 text-xs text-slate-500">Every expense in the window, grouped.</p>
+            </div>
+
+            <Table
+                colSpan={3}
+                empty={list.length === 0 ? 'Nothing spent.' : null}
+                head={
+                    <>
+                        <th className="ct-th">Category</th>
+                        <th className="ct-th text-right">Entries</th>
+                        <th className="ct-th text-right">Total</th>
+                    </>
+                }
+            >
+                {list.map((row) => (
+                    <tr key={row.category} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                        <td className="ct-td font-medium">{row.label}</td>
+                        <td className="ct-td text-right tabular-nums">{row.entries}</td>
+                        <td className="ct-td text-right font-semibold tabular-nums">{money(row.total)}</td>
+                    </tr>
+                ))}
+            </Table>
+        </Card>
+    );
+}
+
 /**
- * Cash in and out of the drawer for the day, each with the reason it was
- * recorded under. This is the only outgoing the system holds — money that never
- * passed through the till is not in here.
+ * The till's own ins and outs. A different question from the expense ledger:
+ * banking the takings empties the drawer without costing the cafe anything.
  */
 function MovementTable({ rows }) {
     const list = rows ?? [];
@@ -278,9 +362,9 @@ function MovementTable({ rows }) {
     return (
         <Card className="overflow-hidden">
             <div className="px-5 py-4">
-                <h2 className="text-sm font-semibold">Money out of the drawer</h2>
+                <h2 className="text-sm font-semibold">The drawer</h2>
                 <p className="mt-0.5 text-xs text-slate-500">
-                    Recorded against the open shift on the <span className="font-medium">Shifts</span> screen.
+                    Cash in and out of the till, including the cash half of the expenses above.
                 </p>
             </div>
 
