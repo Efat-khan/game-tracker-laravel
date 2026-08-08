@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/auth';
+import { useBranding } from '../lib/branding';
 import { useTheme } from '../lib/hooks';
 import { Link, useRouter } from '../lib/router';
 
@@ -62,8 +63,25 @@ function Icon({ name, className = 'h-[18px] w-[18px]' }) {
     );
 }
 
+/**
+ * The logo. The platform owner's upload if there is one, the built-in CT tile
+ * otherwise — the fallback is never a broken image.
+ */
 export function BrandMark({ size = 'md' }) {
+    const { logoUrl } = useBranding();
     const sizes = { md: 'h-9 w-9 text-sm', lg: 'h-12 w-12 text-base' };
+
+    if (logoUrl) {
+        return (
+            <img
+                src={logoUrl}
+                alt=""
+                // contain, not cover: a logo that has been cropped to fill a
+                // square is a logo nobody recognises.
+                className={`shrink-0 rounded-xl object-contain ${sizes[size]}`}
+            />
+        );
+    }
 
     return (
         <span

@@ -86,7 +86,7 @@ function buildQuery(params) {
     return qs ? `?${qs}` : '';
 }
 
-async function request(method, path, { body, params, raw } = {}) {
+async function request(method, path, { body, params, raw, file } = {}) {
     const headers = { Accept: 'application/json' };
     const token = getToken();
 
@@ -95,12 +95,23 @@ async function request(method, path, { body, params, raw } = {}) {
     const cafe = getActiveCafe();
     if (cafe?.id) headers['X-Cafe-Id'] = String(cafe.id);
 
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    let requestBody;
+
+    if (file) {
+        // No Content-Type header: the browser has to set it so it can append
+        // the multipart boundary. Setting it by hand produces a body the server
+        // cannot parse, and an empty $request->file().
+        requestBody = new FormData();
+        requestBody.append('image', file);
+    } else if (body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+        requestBody = JSON.stringify(body);
+    }
 
     const response = await fetch(`/api${path}${buildQuery(params)}`, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: requestBody,
     });
 
     if (response.status === 401) {
@@ -166,6 +177,13 @@ export const api = {
     myCafes: () => get('/cafes/mine'),
     createCafe: (body) => post('/cafes', body),
     updateCafe: (id, body) => patch(`/cafes/${id}`, body),
+
+    /* ---- branding ------------------------------------------------------ */
+    // Public: the login screen reads this before anyone has a token.
+    branding: () => get('/branding'),
+    // Platform owner only — the server enforces that, not this file.
+    uploadBranding: (asset, file) => request('POST', `/branding/${asset}`, { file }),
+    removeBranding: (asset) => del(`/branding/${asset}`),
 
     /* ---- optional modules ---------------------------------------------- */
     // What this cafe may use. The sidebar reads it.

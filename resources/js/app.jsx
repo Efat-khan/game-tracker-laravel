@@ -2,6 +2,7 @@ import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { AuthProvider, useAuth } from './lib/auth';
+import { BrandingProvider } from './lib/branding';
 import { RouterProvider, matchPath, useRouter } from './lib/router';
 import { Shell } from './components/Shell';
 import { Tour, hasSeenTour } from './components/Tour';
@@ -94,9 +95,11 @@ function NotFound() {
 createRoot(document.getElementById('cafetrack')).render(
     <StrictMode>
         <RouterProvider>
-            <AuthProvider>
-                <App />
-            </AuthProvider>
+            <BrandingProvider>
+                <AuthProvider>
+                    <App />
+                </AuthProvider>
+            </BrandingProvider>
         </RouterProvider>
     </StrictMode>,
 );

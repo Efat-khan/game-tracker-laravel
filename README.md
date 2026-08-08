@@ -19,12 +19,12 @@ All money is Bangladeshi Taka (৳).
 The backend was built first as option (A) API-only, on the specification's
 assurance that an existing Next.js frontend would consume it unchanged. That
 frontend is not in this repository and was never available, so the app had no
-usable interface — all 71 routes and no way for staff to reach them. The UI
+usable interface — all 75 routes and no way for staff to reach them. The UI
 here closes that gap.
 
 It is option (B)-shaped — everything under one Laravel roof, React rendering
 the screens — but without Inertia. Inertia wants page props from Laravel
-controllers, which would mean rebuilding the query logic behind all 71 routes a
+controllers, which would mean rebuilding the query logic behind all 75 routes a
 second time. The SPA instead calls the same API any other client would, so the
 tested backend is reused whole and a Next.js app can still be swapped back in
 later. Option (C) Blade + Livewire would have meant the same duplication with
@@ -157,13 +157,48 @@ lookup cannot confirm that *another tenant's* record exists; here the caller is
 asking about their own cafe, and "your plan does not include this" is the
 honest, actionable answer.
 
+### Branding
+
+The platform owner uploads a **login background** and a **logo** from the
+Branding card on the **Cafes** screen, and removes either to fall back to the
+built-in look — an aurora behind the sign-in form and the `CT` tile.
+
+These are the one thing in the app that is *not* per cafe. They are what
+somebody sees before they have signed in, when the app does not yet know which
+cafe they belong to, so they live in their own `platform_settings` table and
+only a superadmin can change them. That table also records which account last
+changed each one: `audit_events` is scoped to a cafe, and a superadmin is inside
+none, so there is nowhere else for the trail to go.
+
+Four things about handling an uploaded image:
+
+- **It never lands anywhere the web server can execute.** Files are written to
+  `storage/app/private/branding` and streamed back by a controller with a
+  content type we choose, `X-Content-Type-Options: nosniff` and
+  `Content-Disposition: inline`. There is no writable directory inside
+  `public/`, and `storage:link` is not required.
+- **SVG is refused.** JPEG, PNG and WebP only, up to 5 MB. An SVG is a document
+  that can carry `<script>`, and it would run under our own origin. The stored
+  extension is derived from the sniffed MIME type, not the filename, so
+  `logo.php.png` cannot smuggle anything past.
+- **The URL changes when the image does.** The stored filename carries a random
+  token. Without that, the owner uploads a new background, the browser serves
+  the old one from cache, and they conclude the upload failed.
+- **The login page is dark whatever theme you picked.** The background is a
+  photograph we have never seen and it could be anything, so the sign-in panel
+  carries its own contrast rather than borrowing the page's, with a scrim
+  between the two — heavy on the left where white text sits straight on the
+  image, lighter on the right where the panel does the work. A light-mode
+  variant would only give a bright card a coin-flip chance against a bright
+  photo.
+
 ### Tests
 
 ```bash
 php artisan test
 ```
 
-**207 feature tests, all green.** They hit real HTTP routes, each against a
+**228 feature tests, all green.** They hit real HTTP routes, each against a
 fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
 without a MySQL server). The migrations are written to compile identically on
 both; the MySQL DDL is what the schema section below describes.
@@ -172,7 +207,7 @@ both; the MySQL DDL is what the schema section below describes.
 | --- | --- |
 | Billing | 27 |
 | Tenancy | 27 |
-| Security | 19 |
+| Security | 20 |
 | Cafe management, staff, settings | 19 |
 | Permissions | 18 |
 | Analytics | 17 |
@@ -181,6 +216,7 @@ both; the MySQL DDL is what the schema section below describes.
 | POS | 15 |
 | Wallet & loyalty | 14 |
 | Optional modules | 16 |
+| Branding | 20 |
 | Auth | 3 |
 
 ---
@@ -374,14 +410,16 @@ customer's name.
 
 ## Schema
 
-15 tables plus `app_settings`. All money `DECIMAL(10,2)`, `discount_percent`
-`DECIMAL(5,2)`, all timestamps naive UTC `DATETIME`, everything
-`utf8mb4_unicode_ci` (customer names and notes contain Bangla text).
+15 tables plus `app_settings`, `cafe_features` and `platform_settings`. All
+money `DECIMAL(10,2)`, `discount_percent` `DECIMAL(5,2)`, all timestamps naive
+UTC `DATETIME`, everything `utf8mb4_unicode_ci` (customer names and notes
+contain Bangla text).
 
 ```
 cafes  admin_users  stations  customers  sessions  invoices  invoice_items
 products  packages  membership_tiers  wallet_transactions  bookings
-shifts  cash_movements  audit_events  app_settings
+shifts  cash_movements  audit_events  app_settings  cafe_features
+platform_settings
 ```
 
 Indexed on `cafe_id` everywhere it exists, plus `sessions.station_id`,
@@ -393,6 +431,10 @@ scoped through their invoice and shift respectively.
 
 `app_settings` is a composite primary key on `(cafe_id, key)`. `key` is a MySQL
 reserved word and is quoted accordingly.
+
+`platform_settings` is the one table with no `cafe_id` at all — it holds the
+branding a visitor sees before they have signed in, when there is no cafe to
+scope it to. Its primary key is `key` alone.
 
 ---
 

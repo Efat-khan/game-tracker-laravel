@@ -4,6 +4,7 @@ use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BookingController;
+use App\Http\Controllers\BrandingController;
 use App\Http\Controllers\CafeController;
 use App\Http\Controllers\CheckinController;
 use App\Http\Controllers\CustomerController;
@@ -28,6 +29,11 @@ Route::get('/health', fn () => ['status' => 'ok']);
 */
 
 Route::get('/stations/{id}/qrcode', [StationController::class, 'qrcode'])->whereNumber('id');
+
+// The login screen needs these before anyone has signed in, so they are public.
+Route::get('/branding', [BrandingController::class, 'show']);
+Route::get('/branding/{asset}', [BrandingController::class, 'image'])
+    ->whereIn('asset', ['login-background', 'logo']);
 
 Route::get('/stations/{id}/public', [StationController::class, 'publicShow'])
     ->whereNumber('id')
@@ -56,6 +62,12 @@ Route::middleware('auth:cafetrack')->group(function () {
         Route::patch('/cafes/{id}', [CafeController::class, 'update'])->whereNumber('id');
         // The grant itself. Superadmin only, by design.
         Route::patch('/cafes/{id}/features', [FeatureController::class, 'update'])->whereNumber('id');
+
+        // Branding is platform-wide, so only the platform owner may change it.
+        Route::post('/branding/{asset}', [BrandingController::class, 'store'])
+            ->whereIn('asset', ['login-background', 'logo']);
+        Route::delete('/branding/{asset}', [BrandingController::class, 'destroy'])
+            ->whereIn('asset', ['login-background', 'logo']);
     });
 });
 

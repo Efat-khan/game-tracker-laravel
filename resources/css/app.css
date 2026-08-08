@@ -115,6 +115,33 @@
         @apply bg-gradient-to-br from-indigo-500 to-live-500 text-white
                shadow-[0_0_18px_-2px_var(--color-indigo-500)];
     }
+
+    /*
+     * Sign-in.
+     *
+     * The login screen is committed to a dark treatment whichever theme the
+     * viewer has chosen. The background is a photograph the platform owner
+     * uploaded and we have never seen — it could be pale, busy, anything — so
+     * the panel above it carries its own contrast rather than borrowing the
+     * page's. Light-mode variants would only give a bright card a coin-flip
+     * chance against a bright photo.
+     */
+    .ct-auth-panel {
+        @apply relative overflow-hidden rounded-2xl border border-white/12 bg-slate-950/72 p-7
+               shadow-[0_1px_0_0_rgb(255_255_255/0.07)_inset,0_30px_70px_-25px_rgb(0_0_0/0.9)]
+               backdrop-blur-2xl;
+    }
+
+    .ct-auth-input {
+        @apply w-full rounded-xl border border-white/12 bg-white/6 px-3.5 py-2.5 text-sm text-white
+               transition placeholder:text-slate-400
+               hover:border-white/20
+               focus:border-indigo-400/70 focus:bg-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500/35;
+    }
+
+    .ct-auth-label {
+        @apply mb-1.5 block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-300;
+    }
 }
 
 @layer utilities {

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useBranding } from '../lib/branding';
 import { useAsync } from '../lib/hooks';
 import { dateTime } from '../lib/format';
 import {
@@ -49,6 +50,8 @@ export default function Cafes() {
             </PageHeader>
 
             <ErrorNote error={error || actionError} onRetry={reload} />
+
+            {isSuperadmin && <BrandingCard onError={setActionError} />}
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {cafes.map((row) => {
@@ -127,6 +130,130 @@ export default function Cafes() {
 
             <NewCafeModal open={creating} onClose={() => setCreating(false)} onDone={reload} />
         </>
+    );
+}
+
+/* ------------------------------------------------------------------ branding */
+
+const ASSETS = [
+    {
+        key: 'login-background',
+        field: 'loginBackgroundUrl',
+        title: 'Login background',
+        hint: 'The photograph behind the sign-in form. Landscape, 1600×900 or larger.',
+        // Wide, because that is the shape it is used at.
+        preview: 'aspect-[16/9] bg-cover bg-center',
+    },
+    {
+        key: 'logo',
+        field: 'logoUrl',
+        title: 'Logo',
+        hint: 'Shown in the sidebar and on the sign-in page. A square with room around the mark works best.',
+        // Boxed, because a square preview at column width dwarfs everything
+        // else on the screen and tells you nothing extra.
+        preview: 'aspect-square w-40 bg-contain bg-center bg-no-repeat',
+    },
+];
+
+/**
+ * Platform branding. Superadmin only, and platform-wide rather than per cafe —
+ * these are what somebody sees before they have signed in, when the app does
+ * not yet know which cafe they belong to.
+ */
+function BrandingCard({ onError }) {
+    const branding = useBranding();
+
+    return (
+        <Card className="mb-4 p-5">
+            <h2 className="text-sm font-semibold">Branding</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+                Applies to every cafe on the platform. Remove an image to go back to the built-in look.
+            </p>
+
+            <div className="mt-4 grid items-start gap-5 sm:grid-cols-2">
+                {ASSETS.map((asset) => (
+                    <AssetUpload
+                        key={asset.key}
+                        asset={asset}
+                        url={branding[asset.field]}
+                        onChanged={branding.reload}
+                        onError={onError}
+                    />
+                ))}
+            </div>
+        </Card>
+    );
+}
+
+function AssetUpload({ asset, url, onChanged, onError }) {
+    const input = useRef(null);
+    const [busy, setBusy] = useState(false);
+
+    async function run(work) {
+        setBusy(true);
+        onError(null);
+
+        try {
+            await work();
+            await onChanged();
+        } catch (err) {
+            onError(err);
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function choose(event) {
+        const file = event.target.files?.[0];
+        // Cleared straight away so picking the same file twice still fires a
+        // change event — otherwise a failed upload cannot be retried as-is.
+        event.target.value = '';
+        if (file) await run(() => api.uploadBranding(asset.key, file));
+    }
+
+    return (
+        <div>
+            <p className="text-xs font-semibold">{asset.title}</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{asset.hint}</p>
+
+            <div
+                className={`mt-2.5 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 ${asset.preview}`}
+                style={url ? { backgroundImage: `url(${JSON.stringify(url)})` } : undefined}
+            >
+                {!url && (
+                    <div className="flex h-full items-center justify-center bg-slate-100 dark:bg-slate-900">
+                        <p className="text-[11px] text-slate-500">Using the built-in look</p>
+                    </div>
+                )}
+            </div>
+
+            <input
+                ref={input}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={choose}
+                className="hidden"
+            />
+
+            <div className="mt-2.5 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" busy={busy} onClick={() => input.current?.click()}>
+                    {url ? 'Replace' : 'Upload'}
+                </Button>
+
+                {url && (
+                    <Button
+                        size="sm"
+                        variant="ghost"
+                        busy={busy}
+                        onClick={() => run(() => api.removeBranding(asset.key))}
+                    >
+                        Remove
+                    </Button>
+                )}
+            </div>
+
+            <p className="mt-1.5 text-[10px] text-slate-500">JPEG, PNG or WebP, up to 5 MB.</p>
+        </div>
     );
 }
 
