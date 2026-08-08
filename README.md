@@ -186,11 +186,26 @@ Four things about handling an uploaded image:
   the old one from cache, and they conclude the upload failed.
 - **The login page is dark whatever theme you picked.** The background is a
   photograph we have never seen and it could be anything, so the sign-in panel
-  carries its own contrast rather than borrowing the page's, with a scrim
-  between the two — heavy on the left where white text sits straight on the
-  image, lighter on the right where the panel does the work. A light-mode
+  carries its own contrast rather than borrowing the page's. A light-mode
   variant would only give a bright card a coin-flip chance against a bright
   photo.
+
+The darkening over that photograph is **local, not a wash**. A full-width scrim
+protects the text but flattens the picture, and whatever the owner uploaded
+almost certainly has its subject in the middle — exactly the part a
+left-to-right gradient throws away. So two soft, heavily feathered pools of
+shadow sit under the two things that need one, the pitch column and the panel,
+and the centre of the frame is left alone. White text sitting straight on the
+image carries a tight dark halo instead of a backing slab, which survives a
+bright band running through the middle of a picture without covering any of it
+up. Checked against a deliberately harsh near-white upload as well as a dark
+one.
+
+The page also drifts: a 48-second, 6% pan across the background, a staggered
+rise on the content, a light travelling along the panel's top edge, and a fine
+CSS-generated grain that both stops a large JPEG banding across a wide screen
+and ties an image nobody here chose to the rest of the product. All of it is
+off under `prefers-reduced-motion`.
 
 ### Tests
 
