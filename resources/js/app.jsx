@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { AuthProvider, useAuth } from './lib/auth';
 import { BrandingProvider } from './lib/branding';
 import { RouterProvider, matchPath, useRouter } from './lib/router';
-import { NAV, Shell } from './components/Shell';
+import { NAV, Shell, navAllows } from './components/Shell';
 import { Tour, hasSeenTour } from './components/Tour';
 
 import Login from './screens/Login';
@@ -88,7 +88,7 @@ function App() {
  * showing somebody a broken screen instead of a plain answer.
  */
 function Route({ path }) {
-    const { isAdmin, can } = useAuth();
+    const { isAdmin, isSuperadmin, can } = useAuth();
 
     const Screen = ROUTES.find(([route]) => route === path)?.[1];
 
@@ -96,24 +96,26 @@ function Route({ path }) {
 
     const nav = NAV.find((item) => item.to === path);
 
-    if (nav && ((nav.adminOnly && !isAdmin) || !can(nav.feature))) {
-        return <NotAvailable adminOnly={Boolean(nav.adminOnly && !isAdmin)} label={nav.label} />;
+    if (nav && !navAllows(nav, { isAdmin, isSuperadmin, can })) {
+        return <NotAvailable item={nav} isAdmin={isAdmin} />;
     }
 
     return <Screen />;
 }
 
-function NotAvailable({ adminOnly, label }) {
+function NotAvailable({ item, isAdmin }) {
     const { navigate } = useRouter();
+
+    const reason = item.superadminOnly
+        ? 'This screen belongs to the platform owner.'
+        : item.adminOnly && !isAdmin
+          ? 'This screen is for admins. Ask whoever runs this cafe if you need it.'
+          : 'This module has not been switched on for this cafe.';
 
     return (
         <div className="mx-auto max-w-md py-24 text-center">
-            <h2 className="text-lg font-semibold">{label} is not available</h2>
-            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                {adminOnly
-                    ? 'This screen is for admins. Ask whoever runs this cafe if you need it.'
-                    : 'This module has not been switched on for this cafe.'}
-            </p>
+            <h2 className="text-lg font-semibold">{item.label} is not available</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">{reason}</p>
             <button
                 onClick={() => navigate('/')}
                 className="mt-5 text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"

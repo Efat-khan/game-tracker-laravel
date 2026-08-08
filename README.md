@@ -102,7 +102,8 @@ php artisan serve
 | **Expenses** | The ledger of what the cafe spends, filterable by window and category, with the running total and the top categories above it. Recording in cash takes the money straight out of the open drawer; the form says so before you try. |
 | **Analytics** | Income and hours charts, gross-profit tiles, utilization bars, a 7 × 24 peak-hours heatmap, and the top station and customer rankings. |
 | **Summary** *(admin)* | The two summary sheets. **Daily**: takings by device type, the day's expenses and where they went by category, the drawer's own movements alongside, how the money arrived (cash / phone / wallet) and what is still unpaid. **Monthly**: every day of the month with sessions, hours, income, expenses and net, plus the device and category breakdowns. Tables, not charts — a sheet you settle up against. |
-| **Logs / Staff / Settings / Cafes** | The activity log, accounts, billing rules with a worked example under each control, and cafe onboarding. **Edit** on a cafe card opens its details and its accounts together — rename it, change its contact email, change an account's email or password, switch a role, add an account or remove one. |
+| **Logs / Staff / Settings** *(admin)* | The activity log, accounts, and billing rules with a worked example under each control. |
+| **Cafes** *(owner)* | Every cafe on the platform, plus the branding. Open one, suspend one, switch between them. **Edit** opens a cafe's details and its accounts together — rename it, change its contact email, change an account's email or password, switch a role, add an account or remove one. Hidden from cafe admins and staff: there is nothing on it they can act on. |
 | **Check-in** *(public)* | Phone-shaped. Controller picker showing the effective rate as it changes. If a session is already running it shows the clock and cost — and deliberately **no stop button**. |
 
 The layout follows a trading-desk pattern. The left sidebar shows icons **and**
@@ -148,6 +149,12 @@ Three things worth knowing about how this is enforced:
   guards the *route* by the same rules, because a path survives a sign-out and
   can be bookmarked or typed. Without that, a staff member landing on an admin
   path renders the screen and gets a wall of 403s instead of a plain answer.
+
+  One function, `navAllows`, answers "may this account see this item" for both
+  the sidebar and the router, so the two can never disagree about who is
+  allowed where. It reads three flags on each nav entry: `superadminOnly`,
+  `adminOnly` and `feature`. The first two are not interchangeable — `isAdmin`
+  is true for the platform owner as well.
 - **A cafe's own admin cannot grant themselves a module.** The switch is
   superadmin-only, and the grant lives in its own `cafe_features` table rather
   than in `app_settings`, which a cafe admin can write to. Otherwise an admin

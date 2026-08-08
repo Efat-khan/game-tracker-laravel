@@ -7,10 +7,14 @@ import { Link, useRouter } from '../lib/router';
 /**
  * Nav order is fixed by the spec.
  *
- * `adminOnly` hides an item from staff. `feature` hides it when the platform
- * owner has not granted this cafe that module — in both cases the item is
- * absent rather than shown-and-disabled, so nobody sees a door they cannot
- * open. The API refuses the routes too; this is only the presentation half.
+ * `adminOnly` hides an item from staff, and `superadminOnly` from everybody
+ * except the platform owner — note that `isAdmin` is true for the owner as
+ * well, so the two are not interchangeable. `feature` hides an item when the
+ * owner has not granted this cafe that module.
+ *
+ * In every case the item is absent rather than shown-and-disabled, so nobody
+ * sees a door they cannot open. The API refuses the routes too; this is only
+ * the presentation half.
  */
 export const NAV = [
     { to: '/', label: 'Dashboard', icon: 'grid', tour: 'Every device at a glance, refreshing every five seconds. Start a session on a free card, end one on a busy card.' },
@@ -28,7 +32,7 @@ export const NAV = [
     { to: '/logs', label: 'Logs', icon: 'list', adminOnly: true, tour: 'Every money-affecting action, who did it and when. Append-only.' },
     { to: '/staff', label: 'Staff', icon: 'badge', adminOnly: true, tour: 'Accounts and roles. Resetting a password or forcing a sign-out ends that person’s sessions everywhere.' },
     { to: '/settings', label: 'Settings', icon: 'cog', adminOnly: true, tour: 'Your billing block, rounding step and trading hours — each shown with a worked example.' },
-    { to: '/cafes', label: 'Cafes', icon: 'building', tour: 'The cafe you are working in. Platform owners can open, suspend and switch between all of them.' },
+    { to: '/cafes', label: 'Cafes', icon: 'building', superadminOnly: true, tour: 'Every cafe on the platform — open one, suspend one, switch between them, and set the branding everybody sees.' },
 ];
 
 const ICONS = {
@@ -96,6 +100,19 @@ export function BrandMark({ size = 'md' }) {
     );
 }
 
+/**
+ * Whether this account may see a nav item at all.
+ *
+ * Shared with the router, so the sidebar and the route it guards can never
+ * disagree about who is allowed where.
+ */
+export function navAllows(item, { isAdmin, isSuperadmin, can }) {
+    if (item.superadminOnly && !isSuperadmin) return false;
+    if (item.adminOnly && !isAdmin) return false;
+
+    return can(item.feature);
+}
+
 const COLLAPSED_KEY = 'cafetrack.sidebar-collapsed';
 
 /**
@@ -126,13 +143,13 @@ function useSidebarCollapsed() {
 }
 
 export function Shell({ children, onStartTour }) {
-    const { signOut, isAdmin, can, needsCafe } = useAuth();
+    const { signOut, isAdmin, isSuperadmin, can, needsCafe } = useAuth();
     const { path } = useRouter();
     const { dark, toggle } = useTheme();
     const [mobileOpen, setMobileOpen] = useState(false);
     const [collapsed, toggleCollapsed] = useSidebarCollapsed();
 
-    const items = NAV.filter((item) => (!item.adminOnly || isAdmin) && can(item.feature));
+    const items = NAV.filter((item) => navAllows(item, { isAdmin, isSuperadmin, can }));
 
     return (
         <div className="flex min-h-screen bg-white dark:bg-slate-950">
