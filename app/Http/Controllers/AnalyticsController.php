@@ -58,6 +58,43 @@ class AnalyticsController extends Controller
         return response()->json($this->analytics->profit($this->context->id(), $this->days($request)));
     }
 
+    /**
+     * Admin only. The date defaults to today; anything unparseable falls back
+     * to today rather than 500ing on a typo in a query string.
+     */
+    public function dailySummary(Request $request): JsonResponse
+    {
+        return response()->json(
+            $this->analytics->dailySummary($this->context->id(), $this->date($request))
+        );
+    }
+
+    /** Admin only. */
+    public function monthlySummary(Request $request): JsonResponse
+    {
+        return response()->json(
+            $this->analytics->monthlySummary($this->context->id(), $this->month($request))
+        );
+    }
+
+    private function date(Request $request): string
+    {
+        $value = (string) $request->query('date', '');
+
+        return preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $value) === 1 && strtotime($value) !== false
+            ? $value
+            : now()->format('Y-m-d');
+    }
+
+    private function month(Request $request): string
+    {
+        $value = (string) $request->query('month', '');
+
+        return preg_match('/^\\d{4}-(0[1-9]|1[0-2])$/', $value) === 1
+            ? $value
+            : now()->format('Y-m');
+    }
+
     /** Admin only. */
     public function staff(Request $request): JsonResponse
     {

@@ -173,6 +173,11 @@ Route::middleware(['auth:cafetrack', 'cafe'])->group(function () {
 
         Route::get('/analytics/staff', [AnalyticsController::class, 'staff']);
 
+        // The two summary sheets. Admin only: they carry what went out of the
+        // drawer and what is left, which is the owner's business.
+        Route::get('/analytics/daily-summary', [AnalyticsController::class, 'dailySummary']);
+        Route::get('/analytics/monthly-summary', [AnalyticsController::class, 'monthlySummary']);
+
         Route::get('/audit', [AuditController::class, 'index']);
         Route::patch('/settings', [SettingsController::class, 'update']);
 

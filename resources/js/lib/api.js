@@ -273,6 +273,9 @@ export const api = {
     peakHours: (params) => get('/analytics/peak-hours', params),
     utilization: (params) => get('/analytics/utilization', params),
     profit: (params) => get('/analytics/profit', params),
+    // The two summary sheets. Admin only — the server enforces that.
+    dailySummary: (date) => get('/analytics/daily-summary', date ? { date } : null),
+    monthlySummary: (month) => get('/analytics/monthly-summary', month ? { month } : null),
     staffAnalytics: (params) => get('/analytics/staff', params),
 
     /* ---- admin ---------------------------------------------------------- */

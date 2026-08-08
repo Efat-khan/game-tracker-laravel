@@ -30,7 +30,7 @@ tested backend is reused whole and a Next.js app can still be swapped back in
 later. Option (C) Blade + Livewire would have meant the same duplication with
 every screen rewritten server-side.
 
-**Fifteen screens**: the fourteen admin screens behind a fixed sidebar, plus
+**Sixteen screens**: the fifteen admin screens behind a fixed sidebar, plus
 the public check-in page a player opens by scanning a booth's QR sticker.
 **Dark by default** — a gaming cafe runs its screens in a dim room and the
 product should look like it belongs on the same counter as the consoles — with
@@ -100,6 +100,7 @@ php artisan serve
 | **Bookings** | Upcoming reservations; Arrived turns one into a live session. |
 | **Shifts** | Live totals split by method, a Drawer panel showing the expected-cash arithmetic line by line, cash in/out and close. |
 | **Analytics** | Income and hours charts, gross-profit tiles, utilization bars, a 7 × 24 peak-hours heatmap, and the top station and customer rankings. |
+| **Summary** *(admin)* | The two summary sheets. **Daily**: takings by device type, the money out of the drawer with the reason each was recorded under, how the day's money arrived (cash / phone / wallet) and what is still unpaid. **Monthly**: every day of the month with sessions, hours, income, expenses and net, plus the device breakdown for the month. Tables, not charts — a sheet you settle up against. |
 | **Logs / Staff / Settings / Cafes** | The activity log, accounts, billing rules with a worked example under each control, and cafe onboarding. **Edit** on a cafe card opens its details and its accounts together — rename it, change its contact email, change an account's email or password, switch a role, add an account or remove one. |
 | **Check-in** *(public)* | Phone-shaped. Controller picker showing the effective rate as it changes. If a session is already running it shows the clock and cost — and deliberately **no stop button**. |
 
@@ -142,7 +143,10 @@ Three things worth knowing about how this is enforced:
 
 - **Hiding the sidebar item is not the guard.** `EnsureFeature` middleware sits
   on the routes and answers **403**, so a disabled module cannot be reached by
-  calling the API directly. The nav is only the presentation half.
+  calling the API directly. The nav is only the presentation half — and the SPA
+  guards the *route* by the same rules, because a path survives a sign-out and
+  can be bookmarked or typed. Without that, a staff member landing on an admin
+  path renders the screen and gets a wall of 403s instead of a plain answer.
 - **A cafe's own admin cannot grant themselves a module.** The switch is
   superadmin-only, and the grant lives in its own `cafe_features` table rather
   than in `app_settings`, which a cafe admin can write to. Otherwise an admin
@@ -178,6 +182,29 @@ Two notes on how it works:
   administer it, and any email, password or role change bumps `token_version`
   and signs that person out everywhere. The header is ignored for a cafe-bound
   account, so an admin cannot reach another cafe's accounts by sending it.
+
+### The day, and what it cost
+
+**Opening and closing the day** is the **Shifts** screen. Open a shift with the
+float in the drawer; every invoice settled while it is open belongs to it. Close
+it by counting the cash, and the app shows expected against counted with the
+variance between them, frozen at that moment — a void the next day cannot
+rewrite a signed-off reconciliation.
+
+```
+expected_cash = opening_float + cash_sales + cash_topups + paid_in − paid_out
+```
+
+Only cash counts towards it. Phone payments and wallet spends are deliberately
+excluded: that money never entered the till (wallet credit was paid for back at
+top-up time, and counted in the drawer then).
+
+**Expenses** are the `paid_out` half of that — cash out of the drawer, each with
+a required reason, an actor and a timestamp. The **Summary** screen totals them
+per day and per month and nets them off income. Two honest limits: an expense
+has to be recorded against an **open shift**, and only money that physically
+left the till is in here. Rent paid by bank transfer is not an expense this
+system knows about.
 
 ### Branding
 
@@ -235,7 +262,7 @@ off under `prefers-reduced-motion`.
 php artisan test
 ```
 
-**249 feature tests, all green.** They hit real HTTP routes, each against a
+**262 feature tests, all green.** They hit real HTTP routes, each against a
 fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
 without a MySQL server). The migrations are written to compile identically on
 both; the MySQL DDL is what the schema section below describes.
@@ -247,7 +274,7 @@ both; the MySQL DDL is what the schema section below describes.
 | Security | 20 |
 | Cafe management, staff, settings | 28 |
 | Permissions | 18 |
-| Analytics | 17 |
+| Analytics and the summary sheets | 30 |
 | Bookings | 17 |
 | Shifts | 15 |
 | POS | 15 |

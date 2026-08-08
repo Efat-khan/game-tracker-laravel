@@ -316,4 +316,192 @@ class AnalyticsService
             'total_variance' => Money::str($row['total_variance']),
         ], $byEmail));
     }
+
+    /* ------------------------------------------------------- summary sheets */
+
+    /**
+     * One trading day, laid out the way a cafe reads it at closing.
+     *
+     * Deliberately a different shape from the charts above: a table you settle
+     * up against, not a trend. It answers "what did each kind of device take,
+     * what went out of the drawer, and what is left".
+     *
+     * `expenses` are the cash paid OUT of the drawer during the day, each with
+     * the reason it was recorded under. That is the only outgoing the system
+     * holds — money that never passed through the till is not in here.
+     */
+    public function dailySummary(int $cafeId, string $date): array
+    {
+        $day = CarbonImmutable::parse($date)->startOfDay();
+
+        return $this->summaryFor($cafeId, $day, $day->addDay()) + [
+            'date' => $day->format('Y-m-d'),
+            'expenses' => $this->movements($cafeId, $day, $day->addDay()),
+        ];
+    }
+
+    /**
+     * A month, one row per day, with the device breakdown for the whole month
+     * underneath.
+     *
+     * Every day of the month is present, including the ones with no trade —
+     * a gap in a ledger reads as missing data rather than a quiet Tuesday.
+     */
+    public function monthlySummary(int $cafeId, string $month): array
+    {
+        $start = CarbonImmutable::parse($month.'-01')->startOfMonth();
+        $end = $start->addMonth();
+
+        $income = $this->invoicesBetween($cafeId, $start, $end)
+            ->selectRaw('DATE(invoices.created_at) as d, COUNT(*) as sessions, SUM(invoices.duration_minutes) as minutes, SUM(invoices.total_amount) as income')
+            ->groupBy('d')
+            ->get()
+            ->keyBy('d');
+
+        $spend = DB::table('cash_movements')
+            ->join('shifts', 'shifts.id', '=', 'cash_movements.shift_id')
+            ->where('shifts.cafe_id', $cafeId)
+            ->where('cash_movements.kind', 'out')
+            ->where('cash_movements.created_at', '>=', $start)
+            ->where('cash_movements.created_at', '<', $end)
+            ->selectRaw('DATE(cash_movements.created_at) as d, SUM(cash_movements.amount) as spent')
+            ->groupBy('d')
+            ->pluck('spent', 'd');
+
+        $days = [];
+
+        for ($cursor = $start; $cursor < $end; $cursor = $cursor->addDay()) {
+            $key = $cursor->format('Y-m-d');
+            $row = $income->get($key);
+
+            $earned = $this->dec($row->income ?? 0);
+            $spent = $this->dec($spend[$key] ?? 0);
+
+            $days[] = [
+                'date' => $key,
+                'sessions' => (int) ($row->sessions ?? 0),
+                'hours' => $this->hours($row->minutes ?? 0),
+                'income' => Money::str($earned),
+                'expenses' => Money::str($spent),
+                'net' => Money::str($earned->minus($spent)),
+            ];
+        }
+
+        return $this->summaryFor($cafeId, $start, $end) + [
+            'month' => $start->format('Y-m'),
+            'days' => $days,
+        ];
+    }
+
+    /**
+     * The half both sheets share: takings by device, how the money arrived,
+     * what went out, and what is left.
+     */
+    private function summaryFor(int $cafeId, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $byDevice = $this->invoicesBetween($cafeId, $from, $to)
+            ->join('sessions', 'sessions.id', '=', 'invoices.session_id')
+            ->join('stations', 'stations.id', '=', 'sessions.station_id')
+            ->selectRaw('stations.type as device, COUNT(*) as sessions, SUM(invoices.duration_minutes) as minutes, SUM(invoices.total_amount) as income')
+            ->groupBy('stations.type')
+            ->orderBy('stations.type')
+            ->get()
+            ->map(fn ($r) => [
+                'device' => $r->device,
+                'sessions' => (int) $r->sessions,
+                'hours' => $this->hours($r->minutes),
+                'income' => Money::str($this->dec($r->income)),
+            ])
+            ->all();
+
+        $paid = $this->invoicesBetween($cafeId, $from, $to)->where('invoices.payment_status', 'paid');
+
+        $cash = $this->dec((clone $paid)->where('invoices.payment_method', 'cash')->sum('invoices.total_amount'));
+        $phone = $this->dec((clone $paid)->where('invoices.payment_method', 'phone_payment')->sum('invoices.total_amount'));
+        $wallet = $this->dec((clone $paid)->where('invoices.payment_method', 'wallet')->sum('invoices.total_amount'));
+
+        $unpaid = $this->dec(
+            $this->invoicesBetween($cafeId, $from, $to)
+                ->where('invoices.payment_status', 'unpaid')
+                ->sum('invoices.total_amount')
+        );
+
+        $income = $this->dec($this->invoicesBetween($cafeId, $from, $to)->sum('invoices.total_amount'));
+        $minutes = (int) $this->invoicesBetween($cafeId, $from, $to)->sum('invoices.duration_minutes');
+        $sessions = (int) $this->invoicesBetween($cafeId, $from, $to)->count();
+
+        $out = $this->dec($this->movementTotal($cafeId, $from, $to, 'out'));
+        $in = $this->dec($this->movementTotal($cafeId, $from, $to, 'in'));
+
+        return [
+            'devices' => $byDevice,
+            'totals' => [
+                'sessions' => $sessions,
+                'hours' => $this->hours($minutes),
+                // Every non-void invoice, whether it has been settled or not.
+                'income' => Money::str($income),
+                'expenses' => Money::str($out),
+                'cash_in' => Money::str($in),
+                'net' => Money::str($income->minus($out)),
+                'cash_sales' => Money::str($cash),
+                'phone_sales' => Money::str($phone),
+                'wallet_sales' => Money::str($wallet),
+                'unpaid' => Money::str($unpaid),
+            ],
+        ];
+    }
+
+    /** Non-void invoices in a half-open window: [from, to). */
+    private function invoicesBetween(int $cafeId, CarbonImmutable $from, CarbonImmutable $to)
+    {
+        return Invoice::where('invoices.cafe_id', $cafeId)
+            ->where('invoices.status', '!=', 'void')
+            ->where('invoices.created_at', '>=', $from)
+            ->where('invoices.created_at', '<', $to);
+    }
+
+    /** Cash that left or entered the drawer, itemised. */
+    private function movements(int $cafeId, CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        return DB::table('cash_movements')
+            ->join('shifts', 'shifts.id', '=', 'cash_movements.shift_id')
+            ->where('shifts.cafe_id', $cafeId)
+            ->where('cash_movements.created_at', '>=', $from)
+            ->where('cash_movements.created_at', '<', $to)
+            ->orderBy('cash_movements.created_at')
+            ->get([
+                'cash_movements.id',
+                'cash_movements.kind',
+                'cash_movements.amount',
+                'cash_movements.reason',
+                'cash_movements.actor_email',
+                'cash_movements.created_at',
+            ])
+            ->map(fn ($r) => [
+                'id' => (int) $r->id,
+                'kind' => $r->kind,
+                'amount' => Money::str($this->dec($r->amount)),
+                'reason' => $r->reason,
+                'actor_email' => $r->actor_email,
+                'created_at' => CarbonImmutable::parse($r->created_at)->format('Y-m-d\\TH:i:s'),
+            ])
+            ->all();
+    }
+
+    private function movementTotal(int $cafeId, CarbonImmutable $from, CarbonImmutable $to, string $kind): string
+    {
+        return (string) DB::table('cash_movements')
+            ->join('shifts', 'shifts.id', '=', 'cash_movements.shift_id')
+            ->where('shifts.cafe_id', $cafeId)
+            ->where('cash_movements.kind', $kind)
+            ->where('cash_movements.created_at', '>=', $from)
+            ->where('cash_movements.created_at', '<', $to)
+            ->sum('cash_movements.amount');
+    }
+
+    /** Minutes as decimal hours, to two places. */
+    private function hours(mixed $minutes): float
+    {
+        return (float) (string) $this->dec((string) ($minutes ?? 0))->dividedBy(60, 2, RoundingMode::HalfUp);
+    }
 }

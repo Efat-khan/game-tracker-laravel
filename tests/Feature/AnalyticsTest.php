@@ -363,4 +363,187 @@ class AnalyticsTest extends TestCase
         $this->assertCount(1, $this->apiGet($this->admin, '/api/analytics/daily-income?days=0')->json());
         $this->assertCount(365, $this->apiGet($this->admin, '/api/analytics/daily-income?days=9999')->json());
     }
+
+    /* ------------------------------------------------- the summary sheets */
+
+    /** An open shift, so cash can be paid out of the drawer against it. */
+    private function openShift(): int
+    {
+        return $this->apiPost($this->admin, '/api/shifts/open', ['opening_float' => '1000'])
+            ->assertCreated()
+            ->json('id');
+    }
+
+    public function test_the_daily_summary_totals_today(): void
+    {
+        $this->invoice();
+        $this->invoice();
+
+        $body = $this->apiGet($this->admin, '/api/analytics/daily-summary')->assertOk()->json();
+
+        $this->assertSame(now()->format('Y-m-d'), $body['date']);
+        $this->assertSame(2, $body['totals']['sessions']);
+        $this->assertSame('300.00', $body['totals']['income']);
+        $this->assertSame('300.00', $body['totals']['cash_sales']);
+        // JSON drops the decimal on a whole number, so this decodes as an int.
+        $this->assertEquals(2, $body['totals']['hours']);
+    }
+
+    public function test_the_daily_summary_groups_by_device_type(): void
+    {
+        $pc = $this->makeStation($this->cafe, ['name' => 'PC - Desk 1', 'type' => 'PC', 'max_controllers' => 1]);
+
+        $this->invoice();
+
+        $customer = $this->makeCustomer($this->cafe, ['phone_or_id' => '01799999999']);
+        $session = $this->makeSession($this->cafe, $pc, $customer, 60);
+        $this->apiPost($this->admin, "/api/checkout/{$session->id}")->assertCreated();
+
+        $devices = collect($this->apiGet($this->admin, '/api/analytics/daily-summary')->assertOk()->json('devices'))
+            ->keyBy('device');
+
+        $this->assertSame(['PC', 'PS5'], $devices->keys()->sort()->values()->all());
+        $this->assertSame(1, $devices['PS5']['sessions']);
+        $this->assertSame(1, $devices['PC']['sessions']);
+    }
+
+    public function test_cash_paid_out_of_the_drawer_is_the_days_expense(): void
+    {
+        $this->invoice();
+        $shift = $this->openShift();
+
+        $this->apiPost($this->admin, "/api/shifts/{$shift}/cash", [
+            'kind' => 'out', 'amount' => '50', 'reason' => 'Snacks restock',
+        ])->assertCreated();
+
+        $body = $this->apiGet($this->admin, '/api/analytics/daily-summary')->assertOk()->json();
+
+        $this->assertSame('50.00', $body['totals']['expenses']);
+        // Net is income less what left the drawer.
+        $this->assertSame('100.00', $body['totals']['net']);
+        $this->assertCount(1, $body['expenses']);
+        $this->assertSame('Snacks restock', $body['expenses'][0]['reason']);
+        $this->assertSame('admin@example.com', $body['expenses'][0]['actor_email']);
+    }
+
+    public function test_cash_paid_in_is_not_counted_as_an_expense(): void
+    {
+        $shift = $this->openShift();
+
+        $this->apiPost($this->admin, "/api/shifts/{$shift}/cash", [
+            'kind' => 'in', 'amount' => '200', 'reason' => 'Float top-up',
+        ])->assertCreated();
+
+        $totals = $this->apiGet($this->admin, '/api/analytics/daily-summary')->assertOk()->json('totals');
+
+        $this->assertSame('0.00', $totals['expenses']);
+        $this->assertSame('200.00', $totals['cash_in']);
+    }
+
+    public function test_the_daily_summary_reads_a_named_day(): void
+    {
+        $this->invoice();
+
+        $totals = $this->apiGet($this->admin, '/api/analytics/daily-summary?date=2020-01-01')
+            ->assertOk()
+            ->json('totals');
+
+        $this->assertSame(0, $totals['sessions']);
+        $this->assertSame('0.00', $totals['income']);
+    }
+
+    public function test_a_nonsense_date_falls_back_to_today(): void
+    {
+        // A typo in a query string should not 500 a reporting screen.
+        $this->apiGet($this->admin, '/api/analytics/daily-summary?date=not-a-date')
+            ->assertOk()
+            ->assertJsonPath('date', now()->format('Y-m-d'));
+    }
+
+    public function test_the_daily_summary_excludes_voided_invoices(): void
+    {
+        $invoice = $this->invoice();
+        $this->apiPost($this->admin, "/api/invoices/{$invoice['id']}/void", ['reason' => 'Duplicate'])->assertOk();
+
+        $this->apiGet($this->admin, '/api/analytics/daily-summary')
+            ->assertOk()
+            ->assertJsonPath('totals.income', '0.00')
+            ->assertJsonPath('totals.sessions', 0);
+    }
+
+    public function test_the_monthly_summary_has_every_day_of_the_month(): void
+    {
+        $this->invoice();
+
+        $body = $this->apiGet($this->admin, '/api/analytics/monthly-summary')->assertOk()->json();
+
+        $this->assertSame(now()->format('Y-m'), $body['month']);
+        $this->assertCount(now()->daysInMonth, $body['days']);
+
+        $today = collect($body['days'])->firstWhere('date', now()->format('Y-m-d'));
+        $this->assertSame('150.00', $today['income']);
+        $this->assertSame('150.00', $today['net']);
+    }
+
+    public function test_the_monthly_summary_nets_expenses_off_the_day_they_fell_on(): void
+    {
+        $this->invoice();
+        $shift = $this->openShift();
+
+        $this->apiPost($this->admin, "/api/shifts/{$shift}/cash", [
+            'kind' => 'out', 'amount' => '40', 'reason' => 'Batteries',
+        ])->assertCreated();
+
+        $body = $this->apiGet($this->admin, '/api/analytics/monthly-summary')->assertOk()->json();
+        $today = collect($body['days'])->firstWhere('date', now()->format('Y-m-d'));
+
+        $this->assertSame('40.00', $today['expenses']);
+        $this->assertSame('110.00', $today['net']);
+        $this->assertSame('110.00', $body['totals']['net']);
+    }
+
+    public function test_a_nonsense_month_falls_back_to_this_one(): void
+    {
+        $this->apiGet($this->admin, '/api/analytics/monthly-summary?month=2020-13')
+            ->assertOk()
+            ->assertJsonPath('month', now()->format('Y-m'));
+    }
+
+    public function test_the_summary_sheets_are_admin_only(): void
+    {
+        $staff = $this->makeUser($this->cafe, 'staff', 'staff@example.com');
+
+        $this->apiGet($staff, '/api/analytics/daily-summary')->assertForbidden();
+        $this->apiGet($staff, '/api/analytics/monthly-summary')->assertForbidden();
+    }
+
+    public function test_one_cafes_summary_never_sees_another(): void
+    {
+        $this->invoice();
+
+        $other = $this->makeCafe('Other Cafe');
+        $otherAdmin = $this->makeUser($other, 'admin', 'other@example.com');
+
+        $this->apiGet($otherAdmin, '/api/analytics/daily-summary')
+            ->assertOk()
+            ->assertJsonPath('totals.income', '0.00');
+    }
+
+    public function test_another_cafes_cash_movements_stay_out_of_the_expenses(): void
+    {
+        $other = $this->makeCafe('Other Cafe');
+        $otherAdmin = $this->makeUser($other, 'admin', 'other@example.com');
+
+        $shift = $this->apiPost($otherAdmin, '/api/shifts/open', ['opening_float' => '500'])
+            ->assertCreated()->json('id');
+
+        $this->apiPost($otherAdmin, "/api/shifts/{$shift}/cash", [
+            'kind' => 'out', 'amount' => '999', 'reason' => 'Not ours',
+        ])->assertCreated();
+
+        $body = $this->apiGet($this->admin, '/api/analytics/daily-summary')->assertOk()->json();
+
+        $this->assertSame('0.00', $body['totals']['expenses']);
+        $this->assertSame([], $body['expenses']);
+    }
 }

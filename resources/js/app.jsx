@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { AuthProvider, useAuth } from './lib/auth';
 import { BrandingProvider } from './lib/branding';
 import { RouterProvider, matchPath, useRouter } from './lib/router';
-import { Shell } from './components/Shell';
+import { NAV, Shell } from './components/Shell';
 import { Tour, hasSeenTour } from './components/Tour';
 
 import Login from './screens/Login';
@@ -19,6 +19,7 @@ import Customers from './screens/Customers';
 import Shifts from './screens/Shifts';
 import Loyalty from './screens/Loyalty';
 import Analytics from './screens/Analytics';
+import Reports from './screens/Reports';
 import Logs from './screens/Logs';
 import Staff from './screens/Staff';
 import Settings from './screens/Settings';
@@ -35,6 +36,7 @@ const ROUTES = [
     ['/shifts', Shifts],
     ['/loyalty', Loyalty],
     ['/analytics', Analytics],
+    ['/summary', Reports],
     ['/logs', Logs],
     ['/staff', Staff],
     ['/settings', Settings],
@@ -64,15 +66,59 @@ function App() {
 
     if (!session) return <Login />;
 
-    const Screen = ROUTES.find(([route]) => route === path)?.[1] ?? NotFound;
-
     return (
         <>
             <Shell onStartTour={() => setTourOpen(true)}>
-                <Screen />
+                <Route path={path} />
             </Shell>
             <Tour open={tourOpen} onClose={() => setTourOpen(false)} />
         </>
+    );
+}
+
+/**
+ * The screen for a path, guarded by the same rules that hide its sidebar item.
+ *
+ * Hiding the nav entry is not enough on its own: the path survives a sign-out,
+ * and it can be bookmarked or typed. Without this, a staff member landing on an
+ * admin path renders the screen, fires its admin-only requests and gets a
+ * wall of 403s. The API refuses them either way — this is only about not
+ * showing somebody a broken screen instead of a plain answer.
+ */
+function Route({ path }) {
+    const { isAdmin, can } = useAuth();
+
+    const Screen = ROUTES.find(([route]) => route === path)?.[1];
+
+    if (!Screen) return <NotFound />;
+
+    const nav = NAV.find((item) => item.to === path);
+
+    if (nav && ((nav.adminOnly && !isAdmin) || !can(nav.feature))) {
+        return <NotAvailable adminOnly={Boolean(nav.adminOnly && !isAdmin)} label={nav.label} />;
+    }
+
+    return <Screen />;
+}
+
+function NotAvailable({ adminOnly, label }) {
+    const { navigate } = useRouter();
+
+    return (
+        <div className="mx-auto max-w-md py-24 text-center">
+            <h2 className="text-lg font-semibold">{label} is not available</h2>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                {adminOnly
+                    ? 'This screen is for admins. Ask whoever runs this cafe if you need it.'
+                    : 'This module has not been switched on for this cafe.'}
+            </p>
+            <button
+                onClick={() => navigate('/')}
+                className="mt-5 text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+                Back to the dashboard
+            </button>
+        </div>
     );
 }
 
