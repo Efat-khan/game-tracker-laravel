@@ -91,10 +91,10 @@ php artisan serve
 
 | | |
 | --- | --- |
-| **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one the rate *that player* is paying, a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Ending shows the itemised bill — billed time, the block it rounded to, the amount rounding and any tier discount — with **To collect** in full, then offers the invoice PDF without leaving the screen. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
+| **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one the rate *that player* is paying, a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Ending shows the itemised bill — billed time, the block it rounded to, the amount rounding and any tier discount — with **To collect** in full, then offers **Print receipt** and **Download PDF** without leaving the screen. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
 | **Stations** | A price per controller count — the boxes follow the controller limit, so raising it asks for the new prices — plus QR preview and PNG download. |
 | **Sessions** | History, filterable by station, status and date. |
-| **Invoices** | Click the status pill to settle or re-open. Expand a row for the money breakdown, item add/remove, wallet settlement and — admins only — discount and void. CSV export and per-row PDF. |
+| **Invoices** | Click the status pill to settle or re-open. Expand a row for the money breakdown, item add/remove, wallet settlement and — admins only — discount and void. CSV export, and per-row **Print** and **PDF**. |
 | **Products / Loyalty** | The catalogue, top-up packages and membership tiers. |
 | **Customers** | Tier, visits, lifetime spend and balance; top up from a package or a custom amount, browse the wallet ledger, and (admins) correct a balance by hand. |
 | **Bookings** | Upcoming reservations; Arrived turns one into a live session. |
@@ -121,6 +121,12 @@ number**: it arrives as a string and is only turned into digits for display,
 because a float cannot hold every 2dp value. **Timestamps get a `Z` appended
 before parsing**: the API sends naive UTC, and without it the browser would
 read every time as local and be wrong by the viewer's offset.
+
+**Printing is not the PDF.** The PDF is a file you keep or email; the receipt
+goes straight to the printer beside the till while the customer is standing
+there, laid out for an 80mm roll and falling back sanely on A4. It prints from a
+hidden iframe rather than a popup, because a popup is the thing browsers block
+and being blocked at the counter is worse than useless.
 
 There is no routing library. Every published version of the obvious one
 currently carries open advisories — none of which apply to a client-only SPA,

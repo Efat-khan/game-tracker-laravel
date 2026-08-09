@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, saveResponseAs } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { printInvoice } from '../lib/print';
 import { useAsync } from '../lib/hooks';
 import { dateTime, money, paymentLabel } from '../lib/format';
 import {
@@ -18,7 +19,7 @@ import {
 } from '../components/ui';
 
 export default function Invoices() {
-    const { isAdmin, canFetch } = useAuth();
+    const { isAdmin, canFetch, cafeName } = useAuth();
     // canFetch, not can: `can` is optimistic while the feature map is still in
     // flight, which would fire one doomed request for a disabled module on
     // every page load.
@@ -124,6 +125,7 @@ export default function Invoices() {
                                 key={invoice.id}
                                 invoice={invoice}
                                 isAdmin={isAdmin}
+                                cafeName={cafeName}
                                 products={products.data ?? []}
                                 expanded={expanded === invoice.id}
                                 busy={busyId === invoice.id}
@@ -140,7 +142,7 @@ export default function Invoices() {
     );
 }
 
-function InvoiceRow({ invoice, isAdmin, products, expanded, busy, onToggleExpand, onTogglePaid, onChanged, onError }) {
+function InvoiceRow({ invoice, isAdmin, cafeName, products, expanded, busy, onToggleExpand, onTogglePaid, onChanged, onError }) {
     const [adding, setAdding] = useState(false);
     const [discounting, setDiscounting] = useState(false);
     const [voiding, setVoiding] = useState(false);
@@ -193,9 +195,14 @@ function InvoiceRow({ invoice, isAdmin, products, expanded, busy, onToggleExpand
                     )}
                 </td>
                 <td className="ct-td text-right">
-                    <Button size="sm" variant="outline" busy={savingPdf} onClick={onDownloadPdf}>
-                        PDF
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={() => printInvoice(invoice, cafeName)}>
+                            Print
+                        </Button>
+                        <Button size="sm" variant="ghost" busy={savingPdf} onClick={onDownloadPdf}>
+                            PDF
+                        </Button>
+                    </div>
                 </td>
             </tr>
 

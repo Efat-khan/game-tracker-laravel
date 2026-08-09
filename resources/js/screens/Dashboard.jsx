@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import { useAsync, useNow, usePolling } from '../lib/hooks';
 import { useChartTheme } from '../lib/charts';
 import { amount, day, duration, money, parseUtc, rateFor } from '../lib/format';
+import { printInvoice } from '../lib/print';
 import { Link } from '../lib/router';
 import { Donut, Meter } from '../components/viz';
 import {
@@ -789,6 +790,7 @@ function StartSessionModal({ row, onClose, onDone }) {
  * the receipt is wanted at the counter, not three clicks later on another one.
  */
 function EndSessionModal({ row, onClose, onDone }) {
+    const { cafeName } = useAuth();
     const [method, setMethod] = useState('cash');
     const [error, setError] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -860,6 +862,9 @@ function EndSessionModal({ row, onClose, onDone }) {
                 <div className="mt-5 flex flex-wrap justify-end gap-2">
                     <Button variant="outline" busy={savingPdf} onClick={downloadPdf}>
                         Download PDF
+                    </Button>
+                    <Button variant="subtle" onClick={() => printInvoice(invoice, cafeName)}>
+                        Print receipt
                     </Button>
                     <Button onClick={close}>Done</Button>
                 </div>
