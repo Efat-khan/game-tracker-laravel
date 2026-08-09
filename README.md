@@ -30,7 +30,7 @@ tested backend is reused whole and a Next.js app can still be swapped back in
 later. Option (C) Blade + Livewire would have meant the same duplication with
 every screen rewritten server-side.
 
-**Seventeen screens**: the sixteen admin screens behind a fixed sidebar, plus
+**Sixteen screens**: the fifteen admin screens behind a fixed sidebar, plus
 the public check-in page a player opens by scanning a booth's QR sticker.
 **Dark by default** — a gaming cafe runs its screens in a dim room and the
 product should look like it belongs on the same counter as the consoles — with
@@ -99,9 +99,8 @@ php artisan serve
 | **Customers** | Tier, visits, lifetime spend and balance; top up from a package or a custom amount, browse the wallet ledger, and (admins) correct a balance by hand. |
 | **Bookings** | Upcoming reservations; Arrived turns one into a live session. |
 | **Shifts** | Live totals split by method, a Drawer panel showing the expected-cash arithmetic line by line, cash in/out and close. |
-| **Expenses** | The ledger of what the cafe spends, filterable by window and category, with the running total and the top categories above it. Recording in cash takes the money straight out of the open drawer; the form says so before you try. |
 | **Analytics** | Income and hours charts, gross-profit tiles, utilization bars, a 7 × 24 peak-hours heatmap, and the top station and customer rankings. |
-| **Summary** *(admin)* | The two summary sheets. **Daily**: takings by device type, the day's expenses and where they went by category, the drawer's own movements alongside, how the money arrived (cash / phone / wallet) and what is still unpaid. **Monthly**: every day of the month with sessions, hours, income, expenses and net, plus the device and category breakdowns. Tables, not charts — a sheet you settle up against. |
+| **Summary** *(admin)* | The two summary sheets. **Daily**: takings by device type, the money out of the drawer with the reason each was recorded under, how the day's money arrived (cash / phone / wallet) and what is still unpaid. **Monthly**: every day of the month with sessions, hours, income, expenses and net, plus the device breakdown for the month. Tables, not charts — a sheet you settle up against. |
 | **Logs / Staff / Settings / Cafes** | The activity log, accounts, billing rules with a worked example under each control, and cafe onboarding. **Edit** on a cafe card opens its details and its accounts together — rename it, change its contact email, change an account's email or password, switch a role, add an account or remove one. |
 | **Check-in** *(public)* | Phone-shaped. Controller picker showing the effective rate as it changes. If a session is already running it shows the clock and cost — and deliberately **no stop button**. |
 
@@ -200,34 +199,12 @@ Only cash counts towards it. Phone payments and wallet spends are deliberately
 excluded: that money never entered the till (wallet credit was paid for back at
 top-up time, and counted in the drawer then).
 
-**Expenses** are their own ledger, and the distinction from the drawer is the
-point of it:
-
-| | |
-| --- | --- |
-| `cash_movements` | reconciles the **till** — the float being topped up, the takings being banked |
-| `expenses` | records what the **business spends**, including what the till never sees |
-
-Banking the takings empties the drawer and costs the cafe nothing. Rent paid by
-bank transfer costs the cafe a great deal and never touches the drawer. Neither
-is expressible if the two are the same table.
-
-The two meet at exactly one point: **an expense paid in cash writes the matching
-cash movement and points at it**, so the drawer maths is unchanged and there is
-still one source of truth for the till. That gives one rule a member of staff
-can hold in their head:
-
-> Paying in **cash** comes out of the open drawer — so a shift has to be open,
-> and it is dated today. **Any other method** never touches the till and can be
-> dated any past day, so a bill can be entered late.
-
-Ten categories, fixed rather than free text: free text becomes "Electricity",
-"electric bill" and "ELEC" inside a month, and a per-category total that adds
-up to nothing. Staff record expenses — they are the ones sent out for change
-and batteries — and only an admin deletes one. Deleting takes the cash movement
-with it, and is **refused once the shift it came out of has been counted**: the
-same rule that freezes a closed shift's `expected_cash`. Every report groups on
-`spent_on`, never on `created_at`.
+**Expenses** are the `paid_out` half of that — cash out of the drawer, each with
+a required reason, an actor and a timestamp. The **Summary** screen totals them
+per day and per month and nets them off income. Two honest limits: an expense
+has to be recorded against an **open shift**, and only money that physically
+left the till is in here. Rent paid by bank transfer is not an expense this
+system knows about.
 
 ### Branding
 
@@ -285,7 +262,7 @@ off under `prefers-reduced-motion`.
 php artisan test
 ```
 
-**289 feature tests, all green.** They hit real HTTP routes, each against a
+**262 feature tests, all green.** They hit real HTTP routes, each against a
 fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
 without a MySQL server). The migrations are written to compile identically on
 both; the MySQL DDL is what the schema section below describes.
@@ -297,8 +274,7 @@ both; the MySQL DDL is what the schema section below describes.
 | Security | 20 |
 | Cafe management, staff, settings | 28 |
 | Permissions | 18 |
-| Analytics and the summary sheets | 33 |
-| Expenses | 24 |
+| Analytics and the summary sheets | 30 |
 | Bookings | 17 |
 | Shifts | 15 |
 | POS | 15 |
@@ -514,8 +490,8 @@ customer's name.
 
 ## Schema
 
-15 tables plus `app_settings`, `cafe_features`, `platform_settings`,
-`station_rates` and `expenses`. All
+15 tables plus `app_settings`, `cafe_features`, `platform_settings` and
+`station_rates`. All
 money `DECIMAL(10,2)`, `discount_percent` `DECIMAL(5,2)`, all timestamps naive
 UTC `DATETIME`, everything `utf8mb4_unicode_ci` (customer names and notes
 contain Bangla text).
@@ -524,7 +500,7 @@ contain Bangla text).
 cafes  admin_users  stations  customers  sessions  invoices  invoice_items
 products  packages  membership_tiers  wallet_transactions  bookings
 shifts  cash_movements  audit_events  app_settings  cafe_features
-platform_settings  station_rates  expenses
+platform_settings  station_rates
 ```
 
 Indexed on `cafe_id` everywhere it exists, plus `sessions.station_id`,
@@ -539,11 +515,6 @@ reserved word and is quoted accordingly.
 
 `station_rates` is a composite primary key on `(station_id, controllers)` and
 cascades on delete — a price list has no meaning without its station.
-
-`expenses` is indexed on `(cafe_id, spent_on)`, which is what every report
-groups by. Its `shift_id` and `cash_movement_id` are nullable and set together:
-both present means the money came out of a drawer, both null means it never
-touched the till.
 
 `platform_settings` is the one table with no `cafe_id` at all — it holds the
 branding a visitor sees before they have signed in, when there is no cafe to
