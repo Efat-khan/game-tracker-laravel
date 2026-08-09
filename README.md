@@ -91,7 +91,7 @@ php artisan serve
 
 | | |
 | --- | --- |
-| **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
+| **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one the rate *that player* is paying, a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Ending shows the itemised bill — billed time, the block it rounded to, the amount rounding and any tier discount — with **To collect** in full, then offers the invoice PDF without leaving the screen. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
 | **Stations** | A price per controller count — the boxes follow the controller limit, so raising it asks for the new prices — plus QR preview and PNG download. |
 | **Sessions** | History, filterable by station, status and date. |
 | **Invoices** | Click the status pill to settle or re-open. Expand a row for the money breakdown, item add/remove, wallet settlement and — admins only — discount and void. CSV export and per-row PDF. |
@@ -292,14 +292,14 @@ off under `prefers-reduced-motion`.
 php artisan test
 ```
 
-**289 feature tests, all green.** They hit real HTTP routes, each against a
+**296 feature tests, all green.** They hit real HTTP routes, each against a
 fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
 without a MySQL server). The migrations are written to compile identically on
 both; the MySQL DDL is what the schema section below describes.
 
 | Group | Tests |
 | --- | --- |
-| Billing | 39 |
+| Billing | 46 |
 | Tenancy | 27 |
 | Security | 20 |
 | Cafe management, staff, settings | 28 |
@@ -352,7 +352,18 @@ station takes is a **400** that names the limit.
 
 The rate is **snapshotted onto the session** (`hourly_rate_snapshot`,
 `base_rate_snapshot`, `controllers`), so a later price change never alters a
-session already running or an invoice already issued.
+session already running or an invoice already issued. That snapshot — not the
+station's headline rate — is what an occupied tile on the floor shows, because
+the two differ the moment somebody picks up a second pad.
+
+`GET /sessions/{id}/quote` runs this whole pipeline **without writing
+anything**, which is what the End-session dialog reads. Quote and checkout go
+through one private `price()` method, so the figure the operator reads out at
+the counter is the figure that gets charged — agreeing by construction rather
+than by two code paths happening to do the same arithmetic. The quote is
+itemised (billed time and the block it was rounded to, gross, the rounding
+adjustment and the step it used, any tier discount) so the operator can say
+*why*, not just assert a total.
 `extra_controller_rate_snapshot` is still written — what each pad past the first
 worked out at — but nothing bills from it; it is there so rows written under the
 old flat model stay comparable.

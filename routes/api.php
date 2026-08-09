@@ -90,6 +90,7 @@ Route::middleware(['auth:cafetrack', 'cafe'])->group(function () {
     /* ---- Sessions ---------------------------------------------------- */
     Route::get('/sessions/active', [SessionController::class, 'active']);
     Route::get('/sessions', [SessionController::class, 'index']);
+    Route::get('/sessions/{id}/quote', [SessionController::class, 'quote'])->whereNumber('id');
     Route::post('/sessions/{id}/cancel', [SessionController::class, 'cancel'])->whereNumber('id');
     Route::post('/checkout/{session}', [SessionController::class, 'checkout'])->whereNumber('session');
 

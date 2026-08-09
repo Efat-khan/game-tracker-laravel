@@ -6,6 +6,8 @@ use App\Models\AdminUser;
 use App\Models\Cafe;
 use App\Models\Customer;
 use App\Models\GameSession;
+use App\Models\Invoice;
+use App\Models\MembershipTier;
 use App\Models\Station;
 use App\Models\StationRate;
 use App\Services\SettingsService;
@@ -562,5 +564,118 @@ class BillingTest extends TestCase
 
         $session = GameSession::where('station_id', $station->id)->where('status', 'active')->firstOrFail();
         $this->assertSame('160.00', $session->hourly_rate_snapshot);
+    }
+
+    /* ------------------------------------------------- the checkout quote */
+
+    public function test_the_quote_is_what_the_checkout_charges(): void
+    {
+        // The whole point: the figure read out at the counter has to be the
+        // figure taken. Both go through one pricing path, and this proves it.
+        app(SettingsService::class)->put($this->cafe->id, [
+            'billing_round_minutes' => 15, 'round_amount_to' => 10,
+        ]);
+
+        $session = $this->makeSession($this->cafe, $this->station, $this->customer, 22);
+
+        $quote = $this->apiGet($this->admin, "/api/sessions/{$session->id}/quote")->assertOk()->json();
+        $invoice = $this->apiPost($this->admin, "/api/checkout/{$session->id}")->assertCreated()->json();
+
+        $this->assertSame($quote['total'], $invoice['total_amount']);
+        $this->assertSame($quote['billed_minutes'], $invoice['duration_minutes']);
+    }
+
+    public function test_the_quote_itemises_the_rounding_the_settings_asked_for(): void
+    {
+        app(SettingsService::class)->put($this->cafe->id, [
+            'billing_round_minutes' => 15, 'round_amount_to' => 10,
+        ]);
+
+        // 22 minutes on a 15-minute block bills as 30; 30 min at 150/hr is 75,
+        // which rounds to the nearest 10 as 80.
+        $session = $this->makeSession($this->cafe, $this->station, $this->customer, 22);
+
+        $this->apiGet($this->admin, "/api/sessions/{$session->id}/quote")
+            ->assertOk()
+            ->assertJsonPath('actual_minutes', 22)
+            ->assertJsonPath('billed_minutes', 30)
+            ->assertJsonPath('block_minutes', 15)
+            ->assertJsonPath('round_amount_to', 10)
+            ->assertJsonPath('hourly_rate', '150.00')
+            ->assertJsonPath('gross', '75.00')
+            ->assertJsonPath('rounding', '5.00')
+            ->assertJsonPath('subtotal', '80.00')
+            ->assertJsonPath('total', '80.00');
+    }
+
+    public function test_the_quote_shows_the_tier_discount(): void
+    {
+        app(SettingsService::class)->put($this->cafe->id, [
+            'billing_round_minutes' => 1, 'round_amount_to' => 1,
+        ]);
+
+        MembershipTier::create([
+            'cafe_id' => $this->cafe->id, 'name' => 'Silver',
+            'min_spend' => '0.00', 'discount_percent' => '10.00',
+            'is_active' => true, 'created_at' => now(),
+        ]);
+
+        $session = $this->makeSession($this->cafe, $this->station, $this->customer, 60);
+
+        $this->apiGet($this->admin, "/api/sessions/{$session->id}/quote")
+            ->assertOk()
+            ->assertJsonPath('subtotal', '150.00')
+            ->assertJsonPath('discount', '15.00')
+            ->assertJsonPath('discount_reason', 'Silver member 10%')
+            ->assertJsonPath('total', '135.00');
+    }
+
+    public function test_the_quote_reports_the_rate_for_the_controllers_in_use(): void
+    {
+        $station = $this->makeStation($this->cafe, [
+            'hourly_rate' => '240.00',
+            'rates' => [1 => '240.00', 2 => '300.00', 3 => '360.00', 4 => '420.00'],
+        ]);
+
+        $this->postJson("/api/checkin/{$station->id}", [
+            'name' => 'Efat', 'phone_or_id' => '01712345678', 'controllers' => 2,
+        ], $this->headersFor($this->admin))->assertCreated();
+
+        $session = GameSession::where('station_id', $station->id)->where('status', 'active')->firstOrFail();
+
+        $this->apiGet($this->admin, "/api/sessions/{$session->id}/quote")
+            ->assertOk()
+            ->assertJsonPath('controllers', 2)
+            // Not the station's 240 headline: what this player is paying.
+            ->assertJsonPath('hourly_rate', '300.00');
+    }
+
+    public function test_quoting_a_session_that_has_already_ended_is_refused(): void
+    {
+        $session = $this->makeSession($this->cafe, $this->station, $this->customer, 30);
+        $this->apiPost($this->admin, "/api/checkout/{$session->id}")->assertCreated();
+
+        $this->apiGet($this->admin, "/api/sessions/{$session->id}/quote")->assertStatus(409);
+    }
+
+    public function test_a_quote_writes_nothing(): void
+    {
+        $session = $this->makeSession($this->cafe, $this->station, $this->customer, 30);
+
+        $this->apiGet($this->admin, "/api/sessions/{$session->id}/quote")->assertOk();
+
+        $this->assertSame('active', $session->fresh()->status);
+        $this->assertNull($session->fresh()->end_time);
+        $this->assertSame(0, Invoice::where('session_id', $session->id)->count());
+    }
+
+    public function test_another_cafe_cannot_quote_this_session(): void
+    {
+        $other = $this->makeCafe('Other Cafe');
+        $otherAdmin = $this->makeUser($other, 'admin', 'other@example.com');
+
+        $session = $this->makeSession($this->cafe, $this->station, $this->customer, 30);
+
+        $this->apiGet($otherAdmin, "/api/sessions/{$session->id}/quote")->assertNotFound();
     }
 }
