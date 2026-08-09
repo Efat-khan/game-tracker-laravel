@@ -798,10 +798,10 @@ function EndSessionModal({ row, onClose, onDone }) {
     const [savingPdf, setSavingPdf] = useState(false);
     const [discount, setDiscount] = useState(BLANK_DISCOUNT);
 
-    // Only send it once it is complete, so a half-typed reason does not make
-    // every keystroke a 422.
-    const ready = Boolean(discount.on && discount.value && discount.reason.trim().length >= 3);
-    const applied = useDebounced(ready ? discount : null, 400);
+    // A figure is enough. The reason is optional — the customer is waiting to
+    // hear a total, so typing 50 has to move it there and then.
+    const wanted = Number(discount.value) > 0 ? discount : null;
+    const applied = useDebounced(wanted, 250);
 
     // Re-quoted every time the dialog opens, and again whenever the discount
     // settles: the clock has moved since the tile last refreshed, and the
@@ -813,6 +813,12 @@ function EndSessionModal({ row, onClose, onDone }) {
     );
 
     const bill = quote.data;
+
+    // Between the keystroke and the server's answer the total on screen is the
+    // old one. Say so, and refuse to charge it, so nobody can take a payment
+    // for a figure that is about to change under them.
+    const settling =
+        JSON.stringify(wanted ?? null) !== JSON.stringify(applied ?? null) || (quote.loading && Boolean(bill));
 
     async function end(takePayment) {
         setBusy(true);
@@ -882,77 +888,117 @@ function EndSessionModal({ row, onClose, onDone }) {
     }
 
     return (
-        <Modal open={Boolean(row)} title={`End ${row?.customer_name ?? 'session'}`} onClose={close}>
+        <Modal
+            open={Boolean(row)}
+            // Room for the second column only when there is one to show: staff
+            // see the bill alone, and a half-empty wide dialog reads as broken.
+            wide={isAdmin}
+            title={`End ${row?.customer_name ?? 'session'}`}
+            onClose={close}
+        >
             <p className="text-sm text-slate-600 dark:text-slate-400">
                 {row?.station_name}
                 {bill ? ` · ${bill.controllers} controller${bill.controllers === 1 ? '' : 's'} · ${money(bill.hourly_rate)}/hr` : ''}
             </p>
 
-            {quote.loading && !bill ? (
-                <Loading label="Working out the bill…" />
-            ) : (
-                bill && (
-                    <div className="mt-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
-                        <BillLine
-                            label="Time played"
-                            note={
-                                bill.billed_minutes !== bill.actual_minutes
-                                    ? `${duration(bill.actual_minutes)}, rounded up to a ${bill.block_minutes}-minute block`
-                                    : 'to the minute'
-                            }
-                            value={duration(bill.billed_minutes)}
-                        />
-
-                        <BillLine
-                            label={`${duration(bill.billed_minutes)} at ${money(bill.hourly_rate)}/hr`}
-                            value={money(bill.gross)}
-                        />
-
-                        {Number(bill.rounding) !== 0 && (
+            {/* Two columns: the itemised bill, and the controls that change it.
+                Side by side they both fit without the dialog scrolling — a
+                discount below the fold is a discount nobody uses. */}
+            <div
+                className={`mt-4 grid gap-4 sm:items-start ${
+                    isAdmin ? 'sm:grid-cols-[minmax(0,1fr)_16rem]' : ''
+                }`}
+            >
+                {quote.loading && !bill ? (
+                    <Loading label="Working out the bill…" />
+                ) : (
+                    bill && (
+                        <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
                             <BillLine
-                                label="Rounding"
-                                note={`to the nearest ${money(bill.round_amount_to)}`}
-                                value={`${Number(bill.rounding) > 0 ? '+' : '−'}${money(Math.abs(Number(bill.rounding)))}`}
-                            />
-                        )}
-
-                        {Number(bill.discount) > 0 && (
-                            <BillLine
-                                label={bill.discount_reason ?? 'Discount'}
+                                label="Time played"
                                 note={
-                                    // A typed discount replaces the tier's, so
-                                    // say so rather than dropping it silently.
-                                    bill.discount_is_manual && Number(bill.tier_discount) > 0
-                                        ? `instead of ${bill.tier_discount_reason} (−${money(bill.tier_discount)})`
-                                        : undefined
+                                    bill.billed_minutes !== bill.actual_minutes
+                                        ? `${duration(bill.actual_minutes)}, rounded up to a ${bill.block_minutes}-minute block`
+                                        : 'to the minute'
                                 }
-                                value={`−${money(bill.discount)}`}
-                                tone="good"
+                                value={duration(bill.billed_minutes)}
                             />
-                        )}
 
-                        <div className="mt-3 flex items-baseline justify-between border-t border-slate-200 pt-3 dark:border-slate-800">
-                            <span className="text-sm font-semibold">To collect</span>
-                            <span className="text-3xl font-bold tabular-nums">{money(bill.total)}</span>
+                            <BillLine
+                                label={`${duration(bill.billed_minutes)} at ${money(bill.hourly_rate)}/hr`}
+                                value={money(bill.gross)}
+                            />
+
+                            {Number(bill.rounding) !== 0 && (
+                                <BillLine
+                                    label="Rounding"
+                                    note={`to the nearest ${money(bill.round_amount_to)}`}
+                                    value={`${Number(bill.rounding) > 0 ? '+' : '−'}${money(Math.abs(Number(bill.rounding)))}`}
+                                />
+                            )}
+
+                            {Number(bill.discount) > 0 && (
+                                <BillLine
+                                    label={bill.discount_reason ?? 'Discount'}
+                                    note={
+                                        // A typed discount replaces the tier's,
+                                        // so say so rather than dropping it
+                                        // silently.
+                                        bill.discount_is_manual && Number(bill.tier_discount) > 0
+                                            ? `instead of ${bill.tier_discount_reason} (−${money(bill.tier_discount)})`
+                                            : undefined
+                                    }
+                                    value={`−${money(bill.discount)}`}
+                                    tone="good"
+                                />
+                            )}
+
+                            <div className="mt-3 flex items-baseline justify-between border-t border-slate-200 pt-3 dark:border-slate-800">
+                                <span className="text-sm font-semibold">To collect</span>
+                                <span
+                                    className={`text-3xl font-bold tabular-nums transition-opacity ${
+                                        settling ? 'opacity-40' : ''
+                                    }`}
+                                >
+                                    {money(bill.total)}
+                                </span>
+                            </div>
+
+                            {settling && (
+                                <p className="mt-1 text-right text-xs text-indigo-600 dark:text-indigo-400">
+                                    Working out the new total…
+                                </p>
+                            )}
                         </div>
-                    </div>
-                )
-            )}
+                    )
+                )}
+
+                <div className="space-y-3">
+                    {/* Money given away is not a floor decision — the API
+                        refuses it from staff too, so this is only the
+                        presentation half. */}
+                    {isAdmin && (
+                        <DiscountFields
+                            value={discount}
+                            onChange={setDiscount}
+                            applied={
+                                bill && !settling && bill.discount_is_manual && Number(bill.discount) > 0
+                                    ? money(bill.discount)
+                                    : null
+                            }
+                        />
+                    )}
+
+                    <Field label="Payment">
+                        <Select value={method} onChange={(e) => setMethod(e.target.value)}>
+                            <option value="cash">Cash</option>
+                            <option value="phone_payment">Phone payment</option>
+                        </Select>
+                    </Field>
+                </div>
+            </div>
 
             <ErrorNote error={quote.error} onRetry={quote.reload} />
-
-            {/* Money given away is not a floor decision — the API refuses it
-                from staff too, so this is only the presentation half. */}
-            {isAdmin && <DiscountFields value={discount} onChange={setDiscount} />}
-
-            <div className="mt-4">
-                <Field label="Payment">
-                    <Select value={method} onChange={(e) => setMethod(e.target.value)}>
-                        <option value="cash">Cash</option>
-                        <option value="phone_payment">Phone payment</option>
-                    </Select>
-                </Field>
-            </div>
 
             {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
 
@@ -960,18 +1006,24 @@ function EndSessionModal({ row, onClose, onDone }) {
                 <Button variant="outline" onClick={close} disabled={busy}>
                     Cancel
                 </Button>
-                <Button variant="subtle" busy={busy} onClick={() => end(false)}>
+                <Button variant="subtle" busy={busy} disabled={settling} onClick={() => end(false)}>
                     End, pay later
                 </Button>
-                <Button variant="success" busy={busy} disabled={!bill} onClick={() => end(true)}>
-                    {bill ? `Take ${money(bill.total)}` : 'End & take payment'}
+                <Button
+                    variant="success"
+                    busy={busy}
+                    // Never offer to take a figure that is about to change.
+                    disabled={!bill || settling}
+                    onClick={() => end(true)}
+                >
+                    {bill && !settling ? `Take ${money(bill.total)}` : 'End & take payment'}
                 </Button>
             </div>
         </Modal>
     );
 }
 
-const BLANK_DISCOUNT = { on: false, kind: 'amount', value: '', reason: '' };
+const BLANK_DISCOUNT = { kind: 'amount', value: '', reason: '' };
 
 /**
  * Hold a value still for a moment before acting on it.
@@ -992,46 +1044,49 @@ function useDebounced(value, delay) {
     return settled;
 }
 
-/** Admin-only: knock something off this bill, with a reason worth reading. */
-function DiscountFields({ value, onChange }) {
+/**
+ * Admin-only: knock something off this bill.
+ *
+ * Always on screen rather than hidden behind a link — at the counter it is
+ * asked for while the customer is standing there, and a discount nobody can
+ * find is a discount given as cash out of the drawer instead.
+ */
+function DiscountFields({ value, onChange, applied }) {
     const set = (key) => (event) => onChange({ ...value, [key]: event.target.value });
-
-    if (!value.on) {
-        return (
-            <button
-                type="button"
-                onClick={() => onChange({ ...BLANK_DISCOUNT, on: true })}
-                className="mt-3 text-xs font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
-            >
-                + Add a discount
-            </button>
-        );
-    }
+    const typed = Number(value.value) > 0;
 
     return (
-        <div className="mt-3 rounded-xl border border-indigo-300 bg-indigo-50/50 p-3 dark:border-indigo-500/40 dark:bg-indigo-500/5">
+        <div
+            className={`rounded-xl border p-3 transition-colors ${
+                typed
+                    ? 'border-indigo-400 bg-indigo-50/70 dark:border-indigo-500/50 dark:bg-indigo-500/10'
+                    : 'border-slate-200 dark:border-slate-800'
+            }`}
+        >
             <div className="mb-2 flex items-center justify-between">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
                     Discount
                 </span>
-                <button
-                    type="button"
-                    onClick={() => onChange(BLANK_DISCOUNT)}
-                    className="text-xs font-semibold text-slate-500 hover:underline"
-                >
-                    Remove
-                </button>
+                {typed && (
+                    <button
+                        type="button"
+                        onClick={() => onChange(BLANK_DISCOUNT)}
+                        className="text-xs font-semibold text-slate-500 hover:underline"
+                    >
+                        Clear
+                    </button>
+                )}
             </div>
 
-            <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+            <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
                 <Select value={value.kind} onChange={set('kind')}>
                     <option value="amount">৳ off</option>
                     <option value="percent">% off</option>
                 </Select>
 
                 <Input
-                    autoFocus
                     type="number"
+                    inputMode="decimal"
                     min="0"
                     step="0.01"
                     max={value.kind === 'percent' ? 100 : undefined}
@@ -1046,13 +1101,13 @@ function DiscountFields({ value, onChange }) {
                     maxLength={200}
                     value={value.reason}
                     onChange={set('reason')}
-                    placeholder="Reason — e.g. regular customer"
+                    placeholder="Reason (optional)"
                 />
             </div>
 
-            {value.value && value.reason.trim().length < 3 && (
-                <p className="mt-1.5 text-xs text-slate-500">
-                    A reason of at least 3 characters applies it.
+            {applied && (
+                <p className="mt-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                    −{applied} off this bill
                 </p>
             )}
         </div>

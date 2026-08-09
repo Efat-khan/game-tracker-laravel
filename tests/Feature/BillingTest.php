@@ -821,13 +821,25 @@ class BillingTest extends TestCase
             ->assertJsonPath('total_amount', '150.00');
     }
 
-    public function test_a_discount_needs_a_reason(): void
+    public function test_a_discount_without_a_reason_still_applies(): void
     {
+        // The amount is what the customer is waiting to hear, so it must not
+        // depend on the operator also typing prose.
         $session = $this->hourLong();
 
-        $this->apiPost($this->admin, "/api/checkout/{$session->id}", ['discount_amount' => '50'])
-            ->assertStatus(422)
-            ->assertJsonValidationErrors('discount_reason');
+        $this->apiGet($this->admin, "/api/sessions/{$session->id}/quote?discount_amount=50")
+            ->assertOk()
+            ->assertJsonPath('discount', '50.00')
+            ->assertJsonPath('discount_reason', 'Counter discount')
+            ->assertJsonPath('total', '100.00');
+
+        $invoice = $this->apiPost($this->admin, "/api/checkout/{$session->id}", [
+            'discount_amount' => '50',
+        ])->assertCreated()->json();
+
+        $this->assertSame('50.00', $invoice['discount_amount']);
+        $this->assertSame('Counter discount', $invoice['discount_reason']);
+        $this->assertSame('100.00', $invoice['total_amount']);
     }
 
     public function test_an_amount_and_a_percentage_together_are_refused(): void

@@ -91,7 +91,7 @@ php artisan serve
 
 | | |
 | --- | --- |
-| **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one the rate *that player* is paying, a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Ending shows the itemised bill — billed time, the block it rounded to, the amount rounding and any tier discount — with **To collect** in full, then offers **Print receipt** and **Download PDF** without leaving the screen. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
+| **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one the rate *that player* is paying, a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Ending shows the itemised bill — billed time, the block it rounded to, the amount rounding and any tier discount — with **To collect** in full, the discount box for admins beside it rather than below the fold, then **Print receipt** and **Download PDF** without leaving the screen. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
 | **Stations** | A price per controller count — the boxes follow the controller limit, so raising it asks for the new prices — plus QR preview and PNG download. |
 | **Sessions** | History, filterable by station, status and date. |
 | **Invoices** | Click the status pill to settle or re-open. Expand a row for the money breakdown, item add/remove, wallet settlement and — admins only — discount and void. CSV export, and per-row **Print** and **PDF**. |
@@ -372,12 +372,16 @@ adjustment and the step it used, any discount) so the operator can say *why*,
 not just assert a total.
 
 **Discounting at the counter.** An admin can knock a flat amount or a
-percentage off before confirming, with a reason. The server does the
-arithmetic and re-quotes, so the preview still cannot drift from what is
-charged, and the discount is capped at what is owed — a discount larger than
-the bill would turn an invoice into a payout. It **replaces** any tier
-discount rather than stacking, because an invoice carries one
-`discount_amount` and one reason; the dialog names the tier discount it is
+percentage off before confirming. The figure alone applies it — the customer is
+standing there waiting to hear a total, so typing `50` moves **To collect** and
+the **Take** button within a moment; the reason is optional and a blank one is
+recorded as a *Counter discount*. The server does the arithmetic and re-quotes,
+so the preview still cannot drift from what is charged, and the discount is
+capped at what is owed — a discount larger than the bill would turn an invoice
+into a payout. While the new total is being worked out the confirm buttons are
+held, so nobody can take a payment for a figure that is about to change. It
+**replaces** any tier discount rather than stacking, because an invoice carries
+one `discount_amount` and one reason; the dialog names the tier discount it is
 superseding rather than dropping it silently. **Admin only**, matching the
 discount action on an invoice — money given away is not a floor decision, and
 the reason and the amount both land in the activity log. Staff check out

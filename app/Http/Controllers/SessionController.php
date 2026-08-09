@@ -17,6 +17,9 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class SessionController extends Controller
 {
+    /** What a hand-entered discount is called when nobody typed a reason. */
+    private const UNNAMED_DISCOUNT = 'Counter discount';
+
     public function __construct(
         private readonly CafeContext $context,
         private readonly SessionService $sessions,
@@ -128,7 +131,12 @@ class SessionController extends Controller
         $request->validate([
             'discount_amount' => ['nullable', 'numeric', 'min:0'],
             'discount_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'discount_reason' => ['required', 'string', 'min:3', 'max:200'],
+            // Optional on purpose. The figure is what the operator is reading
+            // out to a waiting customer, so typing it must move the total at
+            // once; demanding the reason first meant the amount silently did
+            // nothing. A blank one is recorded as a plain counter discount,
+            // which is still a discount named in the log and on the invoice.
+            'discount_reason' => ['nullable', 'string', 'max:200'],
         ]);
 
         if ($hasAmount && $hasPercent) {
@@ -137,10 +145,12 @@ class SessionController extends Controller
             ]);
         }
 
+        $reason = trim((string) $request->input('discount_reason', ''));
+
         return [
             'amount' => $hasAmount ? (string) $request->input('discount_amount') : null,
             'percent' => $hasPercent ? (string) $request->input('discount_percent') : null,
-            'reason' => (string) $request->input('discount_reason'),
+            'reason' => $reason === '' ? self::UNNAMED_DISCOUNT : $reason,
         ];
     }
 

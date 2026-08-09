@@ -170,13 +170,23 @@ export async function saveResponseAs(response, filename) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** {kind:'amount'|'percent', value, reason} as the fields the API expects. */
+/**
+ * {kind:'amount'|'percent', value, reason} as the fields the API expects.
+ *
+ * The figure alone is enough to send: the reason is optional, so the total
+ * moves the moment it is typed rather than waiting for prose that the customer
+ * standing at the counter does not care about.
+ */
 function discountParams(discount) {
-    if (!discount?.value || !discount?.reason) return {};
+    const value = Number(discount?.value);
+
+    if (!Number.isFinite(value) || value <= 0) return {};
+
+    const reason = (discount.reason ?? '').trim();
 
     return {
         [discount.kind === 'percent' ? 'discount_percent' : 'discount_amount']: discount.value,
-        discount_reason: discount.reason,
+        ...(reason ? { discount_reason: reason } : {}),
     };
 }
 
