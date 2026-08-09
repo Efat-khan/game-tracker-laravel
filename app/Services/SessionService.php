@@ -8,6 +8,8 @@ use App\Models\Invoice;
 use App\Models\Station;
 use App\Support\Money;
 use App\Support\Tenancy\CafeContext;
+use Brick\Math\BigDecimal;
+use Brick\Math\RoundingMode;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
@@ -133,7 +135,7 @@ class SessionService
      * agreeing by construction rather than by two code paths happening to do
      * the same arithmetic.
      */
-    private function price(GameSession $session, CarbonInterface $end): array
+    private function price(GameSession $session, CarbonInterface $end, ?array $manual = null): array
     {
         $cafeId = $session->cafe_id;
 
@@ -142,15 +144,50 @@ class SessionService
 
         $priced = $this->billing->priceSession($session, $end, $block, $step);
 
-        // Step 3: the loyalty discount comes off the rounded play charge.
-        $discount = $this->loyalty->discountFor($session->customer, $priced['total']);
+        // Step 3: the discount comes off the rounded play charge. A tier earns
+        // one automatically; a hand-entered one REPLACES it rather than
+        // stacking, because an invoice carries a single discount_amount and a
+        // single reason — the same rule the Invoices screen has always used.
+        $tier = $this->loyalty->discountFor($session->customer, $priced['total']);
+        $discount = $manual === null
+            ? $tier
+            : $this->manualDiscount($priced['total'], $manual);
 
         return [
             'priced' => $priced,
             'discount' => $discount,
+            'tier' => $tier,
+            'manual' => $manual !== null,
             'block' => $block,
             'step' => $step,
             'total' => Money::round($priced['total']->minus($discount['amount'])),
+        ];
+    }
+
+    /**
+     * A discount typed in at the counter, as a flat amount or a percentage.
+     *
+     * Capped at what is owed: a discount larger than the bill would turn an
+     * invoice into a payout.
+     */
+    private function manualDiscount(BigDecimal $subtotal, array $manual): array
+    {
+        $amount = $manual['amount'] ?? null;
+
+        $value = $amount !== null
+            ? Money::round((string) $amount)
+            : Money::round(
+                $subtotal->multipliedBy(Money::of((string) $manual['percent']))->dividedBy(100, 8, RoundingMode::HalfUp)
+            );
+
+        if ($value->isGreaterThan($subtotal)) {
+            $value = $subtotal;
+        }
+
+        return [
+            'amount' => $value,
+            'reason' => mb_substr(trim((string) $manual['reason']), 0, 200),
+            'tier' => null,
         ];
     }
 
@@ -162,9 +199,9 @@ class SessionService
      * the amount rounded to the cafe's step, and any tier discount taken off.
      * Nothing is written.
      */
-    public function quote(GameSession $session): array
+    public function quote(GameSession $session, ?array $manual = null): array
     {
-        $q = $this->price($session, now());
+        $q = $this->price($session, now(), $manual);
         $priced = $q['priced'];
 
         return [
@@ -184,22 +221,28 @@ class SessionService
             'subtotal' => Money::str($priced['total']),
             'discount' => Money::str($q['discount']['amount']),
             'discount_reason' => $q['discount']['reason'],
+            'discount_is_manual' => $q['manual'],
+            // What the customer's tier would have earned. Sent even when a
+            // hand-entered discount supersedes it, so the screen can say so
+            // rather than silently dropping it.
+            'tier_discount' => Money::str($q['tier']['amount']),
+            'tier_discount_reason' => $q['tier']['reason'],
             'total' => Money::str($q['total']),
         ];
     }
 
     /** End a session and raise its invoice. Exactly one invoice per session. */
-    public function checkOut(GameSession $session, ?string $paymentMethod = null): Invoice
+    public function checkOut(GameSession $session, ?string $paymentMethod = null, ?array $manual = null): Invoice
     {
         if ($session->status !== 'active') {
             throw new ConflictHttpException('This session has already ended.');
         }
 
-        return DB::transaction(function () use ($session, $paymentMethod) {
+        return DB::transaction(function () use ($session, $paymentMethod, $manual) {
             $cafeId = $session->cafe_id;
             $end = now();
 
-            $q = $this->price($session, $end);
+            $q = $this->price($session, $end, $manual);
             $priced = $q['priced'];
             $discount = $q['discount'];
 
@@ -222,11 +265,15 @@ class SessionService
             ]);
 
             $this->audit->log('session_end', 'session', $session->id, sprintf(
-                '%s ended on %s — %d min, %s',
+                '%s ended on %s — %d min, %s%s',
                 $session->customer->name,
                 $session->station->name,
                 $priced['billed_minutes'],
                 Money::str($invoice->total_amount),
+                // Money given away is named in the log, with who authorised it.
+                $q['manual'] && $discount['amount']->isPositive()
+                    ? sprintf(' (discounted %s — %s)', Money::str($discount['amount']), $discount['reason'])
+                    : '',
             ));
 
             if ($paymentMethod !== null) {

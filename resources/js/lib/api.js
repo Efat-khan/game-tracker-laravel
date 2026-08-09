@@ -170,6 +170,16 @@ export async function saveResponseAs(response, filename) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/** {kind:'amount'|'percent', value, reason} as the fields the API expects. */
+function discountParams(discount) {
+    if (!discount?.value || !discount?.reason) return {};
+
+    return {
+        [discount.kind === 'percent' ? 'discount_percent' : 'discount_amount']: discount.value,
+        discount_reason: discount.reason,
+    };
+}
+
 const get = (path, params) => request('GET', path, { params });
 const post = (path, body, params) => request('POST', path, { body: body ?? {}, params });
 const patch = (path, body) => request('PATCH', path, { body });
@@ -216,10 +226,16 @@ export const api = {
     /* ---- sessions ----------------------------------------------------- */
     activeSessions: () => get('/sessions/active'),
     // What a running session bills if it ends now, itemised. Nothing is written.
-    sessionQuote: (id) => get(`/sessions/${id}/quote`),
+    // `discount` is {amount|percent, reason} and admin-only; the server both
+    // enforces that and does the arithmetic, so the preview cannot drift from
+    // what the checkout charges.
+    sessionQuote: (id, discount) => get(`/sessions/${id}/quote`, discountParams(discount)),
     sessions: (params) => get('/sessions', params),
-    checkout: (sessionId, paymentMethod) =>
-        post(`/checkout/${sessionId}`, paymentMethod ? { payment_method: paymentMethod } : {}),
+    checkout: (sessionId, paymentMethod, discount) =>
+        post(`/checkout/${sessionId}`, {
+            ...(paymentMethod ? { payment_method: paymentMethod } : {}),
+            ...discountParams(discount),
+        }),
     cancelSession: (id) => post(`/sessions/${id}/cancel`),
 
     /* ---- invoices ------------------------------------------------------ */

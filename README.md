@@ -298,14 +298,14 @@ off under `prefers-reduced-motion`.
 php artisan test
 ```
 
-**296 feature tests, all green.** They hit real HTTP routes, each against a
+**308 feature tests, all green.** They hit real HTTP routes, each against a
 fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
 without a MySQL server). The migrations are written to compile identically on
 both; the MySQL DDL is what the schema section below describes.
 
 | Group | Tests |
 | --- | --- |
-| Billing | 46 |
+| Billing | 58 |
 | Tenancy | 27 |
 | Security | 20 |
 | Cafe management, staff, settings | 28 |
@@ -368,8 +368,20 @@ through one private `price()` method, so the figure the operator reads out at
 the counter is the figure that gets charged — agreeing by construction rather
 than by two code paths happening to do the same arithmetic. The quote is
 itemised (billed time and the block it was rounded to, gross, the rounding
-adjustment and the step it used, any tier discount) so the operator can say
-*why*, not just assert a total.
+adjustment and the step it used, any discount) so the operator can say *why*,
+not just assert a total.
+
+**Discounting at the counter.** An admin can knock a flat amount or a
+percentage off before confirming, with a reason. The server does the
+arithmetic and re-quotes, so the preview still cannot drift from what is
+charged, and the discount is capped at what is owed — a discount larger than
+the bill would turn an invoice into a payout. It **replaces** any tier
+discount rather than stacking, because an invoice carries one
+`discount_amount` and one reason; the dialog names the tier discount it is
+superseding rather than dropping it silently. **Admin only**, matching the
+discount action on an invoice — money given away is not a floor decision, and
+the reason and the amount both land in the activity log. Staff check out
+normally; they simply never see the control, and the API refuses them too.
 `extra_controller_rate_snapshot` is still written — what each pad past the first
 worked out at — but nothing bills from it; it is there so rows written under the
 old flat model stay comparable.

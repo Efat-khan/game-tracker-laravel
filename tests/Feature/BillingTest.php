@@ -678,4 +678,190 @@ class BillingTest extends TestCase
 
         $this->apiGet($otherAdmin, "/api/sessions/{$session->id}/quote")->assertNotFound();
     }
+
+    /* ------------------------------------------- a discount at the counter */
+
+    private function hourLong(): GameSession
+    {
+        app(SettingsService::class)->put($this->cafe->id, [
+            'billing_round_minutes' => 1, 'round_amount_to' => 1,
+        ]);
+
+        return $this->makeSession($this->cafe, $this->station, $this->customer, 60);
+    }
+
+    public function test_a_flat_discount_comes_off_the_quote(): void
+    {
+        $session = $this->hourLong();
+
+        $this->apiGet(
+            $this->admin,
+            "/api/sessions/{$session->id}/quote?discount_amount=50&discount_reason=Regular+customer",
+        )
+            ->assertOk()
+            ->assertJsonPath('subtotal', '150.00')
+            ->assertJsonPath('discount', '50.00')
+            ->assertJsonPath('discount_reason', 'Regular customer')
+            ->assertJsonPath('discount_is_manual', true)
+            ->assertJsonPath('total', '100.00');
+    }
+
+    public function test_a_percentage_discount_comes_off_the_quote(): void
+    {
+        $session = $this->hourLong();
+
+        $this->apiGet(
+            $this->admin,
+            "/api/sessions/{$session->id}/quote?discount_percent=20&discount_reason=Opening+week",
+        )
+            ->assertOk()
+            ->assertJsonPath('discount', '30.00')
+            ->assertJsonPath('total', '120.00');
+    }
+
+    public function test_a_discount_larger_than_the_bill_is_capped(): void
+    {
+        // Otherwise an invoice becomes a payout.
+        $session = $this->hourLong();
+
+        $this->apiGet(
+            $this->admin,
+            "/api/sessions/{$session->id}/quote?discount_amount=9999&discount_reason=Comped+entirely",
+        )
+            ->assertOk()
+            ->assertJsonPath('discount', '150.00')
+            ->assertJsonPath('total', '0.00');
+    }
+
+    public function test_the_discounted_quote_is_what_the_checkout_charges(): void
+    {
+        $session = $this->hourLong();
+
+        $quote = $this->apiGet(
+            $this->admin,
+            "/api/sessions/{$session->id}/quote?discount_percent=20&discount_reason=Opening+week",
+        )->assertOk()->json();
+
+        $invoice = $this->apiPost($this->admin, "/api/checkout/{$session->id}", [
+            'discount_percent' => '20', 'discount_reason' => 'Opening week',
+        ])->assertCreated()->json();
+
+        $this->assertSame($quote['total'], $invoice['total_amount']);
+        $this->assertSame('30.00', $invoice['discount_amount']);
+        $this->assertSame('Opening week', $invoice['discount_reason']);
+    }
+
+    public function test_a_hand_entered_discount_replaces_the_tier_one(): void
+    {
+        // An invoice carries one discount_amount and one reason, so the two
+        // cannot both apply — and the quote says which is winning.
+        MembershipTier::create([
+            'cafe_id' => $this->cafe->id, 'name' => 'Silver',
+            'min_spend' => '0.00', 'discount_percent' => '10.00',
+            'is_active' => true, 'created_at' => now(),
+        ]);
+
+        $session = $this->hourLong();
+
+        $this->apiGet(
+            $this->admin,
+            "/api/sessions/{$session->id}/quote?discount_amount=50&discount_reason=Regular+customer",
+        )
+            ->assertOk()
+            ->assertJsonPath('discount', '50.00')
+            ->assertJsonPath('discount_is_manual', true)
+            // Still reported, so the screen can warn it is being superseded.
+            ->assertJsonPath('tier_discount', '15.00')
+            ->assertJsonPath('tier_discount_reason', 'Silver member 10%')
+            ->assertJsonPath('total', '100.00');
+    }
+
+    public function test_the_tier_discount_still_applies_when_none_is_typed(): void
+    {
+        MembershipTier::create([
+            'cafe_id' => $this->cafe->id, 'name' => 'Silver',
+            'min_spend' => '0.00', 'discount_percent' => '10.00',
+            'is_active' => true, 'created_at' => now(),
+        ]);
+
+        $session = $this->hourLong();
+
+        $this->apiGet($this->admin, "/api/sessions/{$session->id}/quote")
+            ->assertOk()
+            ->assertJsonPath('discount', '15.00')
+            ->assertJsonPath('discount_is_manual', false)
+            ->assertJsonPath('total', '135.00');
+    }
+
+    public function test_staff_cannot_discount_a_bill(): void
+    {
+        $staff = $this->makeUser($this->cafe, 'staff', 'floor@example.com');
+        $session = $this->hourLong();
+
+        $this->apiGet(
+            $staff,
+            "/api/sessions/{$session->id}/quote?discount_amount=50&discount_reason=Regular+customer",
+        )->assertForbidden();
+
+        $this->apiPost($staff, "/api/checkout/{$session->id}", [
+            'discount_amount' => '50', 'discount_reason' => 'Regular customer',
+        ])->assertForbidden();
+
+        // The session is untouched — a refused discount must not end it.
+        $this->assertSame('active', $session->fresh()->status);
+    }
+
+    public function test_staff_can_still_check_out_without_discounting(): void
+    {
+        $staff = $this->makeUser($this->cafe, 'staff', 'floor@example.com');
+        $session = $this->hourLong();
+
+        $this->apiPost($staff, "/api/checkout/{$session->id}")
+            ->assertCreated()
+            ->assertJsonPath('total_amount', '150.00');
+    }
+
+    public function test_a_discount_needs_a_reason(): void
+    {
+        $session = $this->hourLong();
+
+        $this->apiPost($this->admin, "/api/checkout/{$session->id}", ['discount_amount' => '50'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('discount_reason');
+    }
+
+    public function test_an_amount_and_a_percentage_together_are_refused(): void
+    {
+        $session = $this->hourLong();
+
+        $this->apiPost($this->admin, "/api/checkout/{$session->id}", [
+            'discount_amount' => '50', 'discount_percent' => '20', 'discount_reason' => 'Both',
+        ])->assertStatus(422)->assertJsonValidationErrors('discount_amount');
+    }
+
+    public function test_a_percentage_over_a_hundred_is_refused(): void
+    {
+        $session = $this->hourLong();
+
+        $this->apiPost($this->admin, "/api/checkout/{$session->id}", [
+            'discount_percent' => '150', 'discount_reason' => 'Too generous',
+        ])->assertStatus(422)->assertJsonValidationErrors('discount_percent');
+    }
+
+    public function test_the_discount_is_named_in_the_activity_log(): void
+    {
+        $session = $this->hourLong();
+
+        $this->apiPost($this->admin, "/api/checkout/{$session->id}", [
+            'discount_amount' => '50', 'discount_reason' => 'Regular customer',
+        ])->assertCreated();
+
+        $summaries = collect($this->apiGet($this->admin, '/api/audit')->assertOk()->json())
+            ->where('action', 'session_end')
+            ->pluck('summary');
+
+        $this->assertTrue($summaries->contains(
+            fn ($s) => str_contains($s, 'discounted 50.00 — Regular customer'),
+        ));
+    }
 }

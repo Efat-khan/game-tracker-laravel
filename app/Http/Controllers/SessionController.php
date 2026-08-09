@@ -11,7 +11,9 @@ use App\Support\Money;
 use App\Support\Tenancy\CafeContext;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 class SessionController extends Controller
 {
@@ -92,7 +94,7 @@ class SessionController extends Controller
      * What this session bills if it ends now — the confirm screen reads it so
      * the operator can tell the player what to pay before committing.
      */
-    public function quote(int $id): JsonResponse
+    public function quote(Request $request, int $id): JsonResponse
     {
         $session = $this->context->find(GameSession::class, $id);
 
@@ -100,7 +102,46 @@ class SessionController extends Controller
             return response()->json(['message' => 'This session has already ended.'], 409);
         }
 
-        return response()->json($this->sessions->quote($session));
+        return response()->json($this->sessions->quote($session, $this->manualDiscount($request)));
+    }
+
+    /**
+     * A discount typed in at the counter, or null when none was asked for.
+     *
+     * Admin only, matching the discount action on an invoice — money given
+     * away is not a floor decision. Both the preview and the checkout go
+     * through here so they cannot disagree about who may do it.
+     */
+    private function manualDiscount(Request $request): ?array
+    {
+        $hasAmount = $request->filled('discount_amount');
+        $hasPercent = $request->filled('discount_percent');
+
+        if (! $hasAmount && ! $hasPercent) {
+            return null;
+        }
+
+        if (! $this->context->isAdmin()) {
+            throw new AccessDeniedHttpException('Only an admin can discount a bill.');
+        }
+
+        $request->validate([
+            'discount_amount' => ['nullable', 'numeric', 'min:0'],
+            'discount_percent' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'discount_reason' => ['required', 'string', 'min:3', 'max:200'],
+        ]);
+
+        if ($hasAmount && $hasPercent) {
+            throw ValidationException::withMessages([
+                'discount_amount' => 'Give an amount or a percentage, not both.',
+            ]);
+        }
+
+        return [
+            'amount' => $hasAmount ? (string) $request->input('discount_amount') : null,
+            'percent' => $hasPercent ? (string) $request->input('discount_percent') : null,
+            'reason' => (string) $request->input('discount_reason'),
+        ];
     }
 
     public function index(Request $request): JsonResponse
@@ -149,7 +190,7 @@ class SessionController extends Controller
             ], 422);
         }
 
-        $invoice = $this->sessions->checkOut($session, $method);
+        $invoice = $this->sessions->checkOut($session, $method, $this->manualDiscount($request));
 
         return response()->json(
             Present::invoice($invoice->load(['items', 'session.station', 'session.customer'])),

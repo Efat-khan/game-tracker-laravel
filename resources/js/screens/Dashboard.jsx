@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 import { api, saveResponseAs } from '../lib/api';
@@ -790,18 +790,26 @@ function StartSessionModal({ row, onClose, onDone }) {
  * the receipt is wanted at the counter, not three clicks later on another one.
  */
 function EndSessionModal({ row, onClose, onDone }) {
-    const { cafeName } = useAuth();
+    const { cafeName, isAdmin } = useAuth();
     const [method, setMethod] = useState('cash');
     const [error, setError] = useState(null);
     const [busy, setBusy] = useState(false);
     const [invoice, setInvoice] = useState(null);
     const [savingPdf, setSavingPdf] = useState(false);
+    const [discount, setDiscount] = useState(BLANK_DISCOUNT);
 
-    // Re-quoted every time the dialog opens: the clock has moved since the
-    // tile last refreshed, and a stale total is worse than none.
+    // Only send it once it is complete, so a half-typed reason does not make
+    // every keystroke a 422.
+    const ready = Boolean(discount.on && discount.value && discount.reason.trim().length >= 3);
+    const applied = useDebounced(ready ? discount : null, 400);
+
+    // Re-quoted every time the dialog opens, and again whenever the discount
+    // settles: the clock has moved since the tile last refreshed, and the
+    // server does the discount arithmetic so the preview cannot drift from
+    // what the checkout charges.
     const quote = useAsync(
-        () => (row?.session_id ? api.sessionQuote(row.session_id) : Promise.resolve(null)),
-        [row?.session_id],
+        () => (row?.session_id ? api.sessionQuote(row.session_id, applied) : Promise.resolve(null)),
+        [row?.session_id, applied?.kind, applied?.value, applied?.reason],
     );
 
     const bill = quote.data;
@@ -813,7 +821,7 @@ function EndSessionModal({ row, onClose, onDone }) {
         try {
             // wallet is never sent from here — it is set by the pay-from-wallet
             // action on the invoice itself.
-            const created = await api.checkout(row.session_id, takePayment ? method : null);
+            const created = await api.checkout(row.session_id, takePayment ? method : null, applied);
             setInvoice(created);
             onDone();
         } catch (err) {
@@ -841,6 +849,7 @@ function EndSessionModal({ row, onClose, onDone }) {
         setInvoice(null);
         setError(null);
         setMethod('cash');
+        setDiscount(BLANK_DISCOUNT);
         onClose();
     }
 
@@ -910,6 +919,13 @@ function EndSessionModal({ row, onClose, onDone }) {
                         {Number(bill.discount) > 0 && (
                             <BillLine
                                 label={bill.discount_reason ?? 'Discount'}
+                                note={
+                                    // A typed discount replaces the tier's, so
+                                    // say so rather than dropping it silently.
+                                    bill.discount_is_manual && Number(bill.tier_discount) > 0
+                                        ? `instead of ${bill.tier_discount_reason} (−${money(bill.tier_discount)})`
+                                        : undefined
+                                }
                                 value={`−${money(bill.discount)}`}
                                 tone="good"
                             />
@@ -924,6 +940,10 @@ function EndSessionModal({ row, onClose, onDone }) {
             )}
 
             <ErrorNote error={quote.error} onRetry={quote.reload} />
+
+            {/* Money given away is not a floor decision — the API refuses it
+                from staff too, so this is only the presentation half. */}
+            {isAdmin && <DiscountFields value={discount} onChange={setDiscount} />}
 
             <div className="mt-4">
                 <Field label="Payment">
@@ -948,6 +968,94 @@ function EndSessionModal({ row, onClose, onDone }) {
                 </Button>
             </div>
         </Modal>
+    );
+}
+
+const BLANK_DISCOUNT = { on: false, kind: 'amount', value: '', reason: '' };
+
+/**
+ * Hold a value still for a moment before acting on it.
+ *
+ * Without this the dialog re-quotes on every keystroke of the reason, which is
+ * a request per character for a number that has not changed.
+ */
+function useDebounced(value, delay) {
+    const [settled, setSettled] = useState(value);
+
+    useEffect(() => {
+        const timer = setTimeout(() => setSettled(value), delay);
+        return () => clearTimeout(timer);
+        // Compared by content, not identity: the caller rebuilds the object on
+        // every render, so an identity check would never settle.
+    }, [JSON.stringify(value ?? null), delay]);
+
+    return settled;
+}
+
+/** Admin-only: knock something off this bill, with a reason worth reading. */
+function DiscountFields({ value, onChange }) {
+    const set = (key) => (event) => onChange({ ...value, [key]: event.target.value });
+
+    if (!value.on) {
+        return (
+            <button
+                type="button"
+                onClick={() => onChange({ ...BLANK_DISCOUNT, on: true })}
+                className="mt-3 text-xs font-semibold text-indigo-600 hover:underline dark:text-indigo-400"
+            >
+                + Add a discount
+            </button>
+        );
+    }
+
+    return (
+        <div className="mt-3 rounded-xl border border-indigo-300 bg-indigo-50/50 p-3 dark:border-indigo-500/40 dark:bg-indigo-500/5">
+            <div className="mb-2 flex items-center justify-between">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    Discount
+                </span>
+                <button
+                    type="button"
+                    onClick={() => onChange(BLANK_DISCOUNT)}
+                    className="text-xs font-semibold text-slate-500 hover:underline"
+                >
+                    Remove
+                </button>
+            </div>
+
+            <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-2">
+                <Select value={value.kind} onChange={set('kind')}>
+                    <option value="amount">৳ off</option>
+                    <option value="percent">% off</option>
+                </Select>
+
+                <Input
+                    autoFocus
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    max={value.kind === 'percent' ? 100 : undefined}
+                    value={value.value}
+                    onChange={set('value')}
+                    placeholder={value.kind === 'percent' ? '10' : '50'}
+                />
+            </div>
+
+            <div className="mt-2">
+                <Input
+                    maxLength={200}
+                    value={value.reason}
+                    onChange={set('reason')}
+                    placeholder="Reason — e.g. regular customer"
+                />
+            </div>
+
+            {value.value && value.reason.trim().length < 3 && (
+                <p className="mt-1.5 text-xs text-slate-500">
+                    A reason of at least 3 characters applies it.
+                </p>
+            )}
+        </div>
     );
 }
 
