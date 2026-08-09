@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
-import { api } from '../lib/api';
+import { api, saveResponseAs } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAsync, useNow, usePolling } from '../lib/hooks';
 import { useChartTheme } from '../lib/charts';
 import { amount, day, duration, money, parseUtc, rateFor } from '../lib/format';
+import { printInvoice } from '../lib/print';
 import { Link } from '../lib/router';
 import { Donut, Meter } from '../components/viz';
 import {
@@ -202,7 +203,12 @@ function StationTile({ row, now, onStart, onEnd, onMaintenance }) {
                         {row.station_name}
                     </p>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
-                        {row.station_type} · {money(row.hourly_rate)}/hr
+                        {/* An occupied booth shows what THIS player is being
+                            charged, which is the rate for their controller
+                            count — not the station's one-pad headline. The two
+                            differ the moment somebody picks up a second pad. */}
+                        {row.station_type} · {money(row.session_hourly_rate ?? row.hourly_rate)}/hr
+                        {row.controllers > 1 && ` · ${row.controllers} pads`}
                     </p>
                 </div>
 
@@ -772,10 +778,33 @@ function StartSessionModal({ row, onClose, onDone }) {
     );
 }
 
+/**
+ * Ending a session.
+ *
+ * The floor shows a running cost, which is deliberately unrounded — it is a
+ * ticking display, not a bill. This screen shows the BILL: the same §5.1
+ * pipeline the checkout runs, quoted from the server so the figure the operator
+ * reads out is the figure that gets charged, itemised so they can say why.
+ *
+ * After it ends, the invoice is offered as a PDF without leaving the screen —
+ * the receipt is wanted at the counter, not three clicks later on another one.
+ */
 function EndSessionModal({ row, onClose, onDone }) {
+    const { cafeName } = useAuth();
     const [method, setMethod] = useState('cash');
     const [error, setError] = useState(null);
     const [busy, setBusy] = useState(false);
+    const [invoice, setInvoice] = useState(null);
+    const [savingPdf, setSavingPdf] = useState(false);
+
+    // Re-quoted every time the dialog opens: the clock has moved since the
+    // tile last refreshed, and a stale total is worse than none.
+    const quote = useAsync(
+        () => (row?.session_id ? api.sessionQuote(row.session_id) : Promise.resolve(null)),
+        [row?.session_id],
+    );
+
+    const bill = quote.data;
 
     async function end(takePayment) {
         setBusy(true);
@@ -784,9 +813,9 @@ function EndSessionModal({ row, onClose, onDone }) {
         try {
             // wallet is never sent from here — it is set by the pay-from-wallet
             // action on the invoice itself.
-            await api.checkout(row.session_id, takePayment ? method : null);
+            const created = await api.checkout(row.session_id, takePayment ? method : null);
+            setInvoice(created);
             onDone();
-            onClose();
         } catch (err) {
             setError(err.firstError || err.message);
         } finally {
@@ -794,16 +823,107 @@ function EndSessionModal({ row, onClose, onDone }) {
         }
     }
 
+    async function downloadPdf() {
+        setSavingPdf(true);
+        setError(null);
+
+        try {
+            const response = await api.invoicePdf(invoice.id);
+            await saveResponseAs(response, `invoice-${invoice.id}.pdf`);
+        } catch (err) {
+            setError(err.firstError || err.message);
+        } finally {
+            setSavingPdf(false);
+        }
+    }
+
+    function close() {
+        setInvoice(null);
+        setError(null);
+        setMethod('cash');
+        onClose();
+    }
+
+    // Settled: show what was charged and offer the receipt.
+    if (invoice) {
+        return (
+            <Modal open title="Session ended" onClose={close}>
+                <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4 text-center dark:border-emerald-500/40 dark:bg-emerald-500/10">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-400">
+                        Invoice #{invoice.id} · {invoice.payment_status === 'paid' ? 'Paid' : 'Unpaid'}
+                    </p>
+                    <p className="mt-1 text-3xl font-bold tabular-nums text-emerald-700 dark:text-emerald-300">
+                        {money(invoice.total_amount)}
+                    </p>
+                </div>
+
+                {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
+
+                <div className="mt-5 flex flex-wrap justify-end gap-2">
+                    <Button variant="outline" busy={savingPdf} onClick={downloadPdf}>
+                        Download PDF
+                    </Button>
+                    <Button variant="subtle" onClick={() => printInvoice(invoice, cafeName)}>
+                        Print receipt
+                    </Button>
+                    <Button onClick={close}>Done</Button>
+                </div>
+            </Modal>
+        );
+    }
+
     return (
-        <Modal open={Boolean(row)} title={`End ${row?.customer_name ?? 'session'}`} onClose={onClose}>
+        <Modal open={Boolean(row)} title={`End ${row?.customer_name ?? 'session'}`} onClose={close}>
             <p className="text-sm text-slate-600 dark:text-slate-400">
-                {row?.station_name} · {duration(row?.elapsed_minutes)} so far ·{' '}
-                <span className="font-semibold">{money(row?.running_cost)}</span> at the current rate.
+                {row?.station_name}
+                {bill ? ` · ${bill.controllers} controller${bill.controllers === 1 ? '' : 's'} · ${money(bill.hourly_rate)}/hr` : ''}
             </p>
-            <p className="mt-2 text-xs text-slate-500">
-                The final bill rounds the time up to a whole block and the amount to the nearest step, so it may
-                differ slightly from the running figure.
-            </p>
+
+            {quote.loading && !bill ? (
+                <Loading label="Working out the bill…" />
+            ) : (
+                bill && (
+                    <div className="mt-4 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                        <BillLine
+                            label="Time played"
+                            note={
+                                bill.billed_minutes !== bill.actual_minutes
+                                    ? `${duration(bill.actual_minutes)}, rounded up to a ${bill.block_minutes}-minute block`
+                                    : 'to the minute'
+                            }
+                            value={duration(bill.billed_minutes)}
+                        />
+
+                        <BillLine
+                            label={`${duration(bill.billed_minutes)} at ${money(bill.hourly_rate)}/hr`}
+                            value={money(bill.gross)}
+                        />
+
+                        {Number(bill.rounding) !== 0 && (
+                            <BillLine
+                                label="Rounding"
+                                note={`to the nearest ${money(bill.round_amount_to)}`}
+                                value={`${Number(bill.rounding) > 0 ? '+' : '−'}${money(Math.abs(Number(bill.rounding)))}`}
+                            />
+                        )}
+
+                        {Number(bill.discount) > 0 && (
+                            <BillLine
+                                label={bill.discount_reason ?? 'Discount'}
+                                value={`−${money(bill.discount)}`}
+                                tone="good"
+                            />
+                        )}
+
+                        <div className="mt-3 flex items-baseline justify-between border-t border-slate-200 pt-3 dark:border-slate-800">
+                            <span className="text-sm font-semibold">To collect</span>
+                            <span className="text-3xl font-bold tabular-nums">{money(bill.total)}</span>
+                        </div>
+                    </div>
+                )
+            )}
+
+            <ErrorNote error={quote.error} onRetry={quote.reload} />
 
             <div className="mt-4">
                 <Field label="Payment">
@@ -817,16 +937,34 @@ function EndSessionModal({ row, onClose, onDone }) {
             {error && <p className="mt-3 text-sm text-rose-600 dark:text-rose-400">{error}</p>}
 
             <div className="mt-5 flex flex-wrap justify-end gap-2">
-                <Button variant="outline" onClick={onClose} disabled={busy}>
+                <Button variant="outline" onClick={close} disabled={busy}>
                     Cancel
                 </Button>
                 <Button variant="subtle" busy={busy} onClick={() => end(false)}>
                     End, pay later
                 </Button>
-                <Button variant="success" busy={busy} onClick={() => end(true)}>
-                    End &amp; take payment
+                <Button variant="success" busy={busy} disabled={!bill} onClick={() => end(true)}>
+                    {bill ? `Take ${money(bill.total)}` : 'End & take payment'}
                 </Button>
             </div>
         </Modal>
+    );
+}
+
+function BillLine({ label, note, value, tone }) {
+    return (
+        <div className="flex items-baseline justify-between gap-4 py-1.5">
+            <span className="min-w-0">
+                <span className="text-sm">{label}</span>
+                {note && <span className="block text-xs text-slate-500">{note}</span>}
+            </span>
+            <span
+                className={`shrink-0 tabular-nums ${
+                    tone === 'good' ? 'text-emerald-600 dark:text-emerald-400' : ''
+                }`}
+            >
+                {value}
+            </span>
+        </div>
     );
 }

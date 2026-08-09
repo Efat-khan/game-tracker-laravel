@@ -88,6 +88,21 @@ class SessionController extends Controller
         return response()->json($rows->values()->all());
     }
 
+    /**
+     * What this session bills if it ends now — the confirm screen reads it so
+     * the operator can tell the player what to pay before committing.
+     */
+    public function quote(int $id): JsonResponse
+    {
+        $session = $this->context->find(GameSession::class, $id);
+
+        if ($session->status !== 'active') {
+            return response()->json(['message' => 'This session has already ended.'], 409);
+        }
+
+        return response()->json($this->sessions->quote($session));
+    }
+
     public function index(Request $request): JsonResponse
     {
         $query = $this->context->scope(GameSession::class)->with(['station', 'customer', 'invoice']);

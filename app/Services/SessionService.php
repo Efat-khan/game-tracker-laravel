@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\Station;
 use App\Support\Money;
 use App\Support\Tenancy\CafeContext;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -124,6 +125,69 @@ class SessionService
         return $customer;
     }
 
+    /**
+     * Run the whole §5.1 pipeline for a session ending at a given moment.
+     *
+     * Both the quote and the checkout go through here, so the figure the
+     * operator is shown before confirming is the figure that gets charged —
+     * agreeing by construction rather than by two code paths happening to do
+     * the same arithmetic.
+     */
+    private function price(GameSession $session, CarbonInterface $end): array
+    {
+        $cafeId = $session->cafe_id;
+
+        $block = $this->settings->billingRoundMinutes($cafeId);
+        $step = $this->settings->roundAmountTo($cafeId);
+
+        $priced = $this->billing->priceSession($session, $end, $block, $step);
+
+        // Step 3: the loyalty discount comes off the rounded play charge.
+        $discount = $this->loyalty->discountFor($session->customer, $priced['total']);
+
+        return [
+            'priced' => $priced,
+            'discount' => $discount,
+            'block' => $block,
+            'step' => $step,
+            'total' => Money::round($priced['total']->minus($discount['amount'])),
+        ];
+    }
+
+    /**
+     * What this session bills if it ends right now, itemised.
+     *
+     * The running cost on the floor is deliberately unrounded — it is a ticking
+     * display, not a bill. This is the bill: time rounded up to a whole block,
+     * the amount rounded to the cafe's step, and any tier discount taken off.
+     * Nothing is written.
+     */
+    public function quote(GameSession $session): array
+    {
+        $q = $this->price($session, now());
+        $priced = $q['priced'];
+
+        return [
+            'session_id' => $session->id,
+            'station_name' => $session->station->name,
+            'customer_name' => $session->customer?->name,
+            'controllers' => $session->controllers,
+            'hourly_rate' => Money::str($priced['effective_rate']),
+            'actual_minutes' => $priced['actual_minutes'],
+            'billed_minutes' => $priced['billed_minutes'],
+            // Echoed so the screen can say WHY the numbers moved, rather than
+            // just asserting a total the operator has to take on trust.
+            'block_minutes' => $q['block'],
+            'round_amount_to' => $q['step'],
+            'gross' => Money::str($priced['gross']),
+            'rounding' => Money::str($priced['total']->minus($priced['gross'])),
+            'subtotal' => Money::str($priced['total']),
+            'discount' => Money::str($q['discount']['amount']),
+            'discount_reason' => $q['discount']['reason'],
+            'total' => Money::str($q['total']),
+        ];
+    }
+
     /** End a session and raise its invoice. Exactly one invoice per session. */
     public function checkOut(GameSession $session, ?string $paymentMethod = null): Invoice
     {
@@ -135,19 +199,13 @@ class SessionService
             $cafeId = $session->cafe_id;
             $end = now();
 
-            $priced = $this->billing->priceSession(
-                $session,
-                $end,
-                $this->settings->billingRoundMinutes($cafeId),
-                $this->settings->roundAmountTo($cafeId),
-            );
+            $q = $this->price($session, $end);
+            $priced = $q['priced'];
+            $discount = $q['discount'];
 
             $session->end_time = $end;
             $session->status = 'completed';
             $session->save();
-
-            // Step 3: the loyalty discount comes off the rounded play charge.
-            $discount = $this->loyalty->discountFor($session->customer, $priced['total']);
 
             $invoice = Invoice::create([
                 'cafe_id' => $cafeId,
@@ -156,7 +214,7 @@ class SessionService
                 'items_amount' => '0.00',
                 'discount_amount' => (string) $discount['amount'],
                 'discount_reason' => $discount['reason'],
-                'total_amount' => (string) Money::round($priced['total']->minus($discount['amount'])),
+                'total_amount' => (string) $q['total'],
                 'duration_minutes' => $priced['billed_minutes'],
                 'payment_status' => 'unpaid',
                 'status' => 'active',

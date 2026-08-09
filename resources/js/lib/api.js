@@ -215,6 +215,8 @@ export const api = {
 
     /* ---- sessions ----------------------------------------------------- */
     activeSessions: () => get('/sessions/active'),
+    // What a running session bills if it ends now, itemised. Nothing is written.
+    sessionQuote: (id) => get(`/sessions/${id}/quote`),
     sessions: (params) => get('/sessions', params),
     checkout: (sessionId, paymentMethod) =>
         post(`/checkout/${sessionId}`, paymentMethod ? { payment_method: paymentMethod } : {}),

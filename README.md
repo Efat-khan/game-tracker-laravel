@@ -91,16 +91,16 @@ php artisan serve
 
 | | |
 | --- | --- |
-| **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
+| **Dashboard** | A welcome header with search, then every device on the floor in a wrapping grid — no sideways scrolling, because a device hidden off the edge of a track is a device nobody notices is free. It refreshes every 5 s and pauses while the tab is hidden. A free tile carries a **Start session** button, a live one the rate *that player* is paying, a ticking timer, running cost, a meter against `planned_minutes` and **End session**. Ending shows the itemised bill — billed time, the block it rounded to, the amount rounding and any tier discount — with **To collect** in full, then offers **Print receipt** and **Download PDF** without leaving the screen. Below: a takings area chart with 7/14/30-day ranges, today's till card, busiest-devices bars, an in-play table and a **Needs attention** list of overdue play, unpaid bills and devices down. |
 | **Stations** | A price per controller count — the boxes follow the controller limit, so raising it asks for the new prices — plus QR preview and PNG download. |
 | **Sessions** | History, filterable by station, status and date. |
-| **Invoices** | Click the status pill to settle or re-open. Expand a row for the money breakdown, item add/remove, wallet settlement and — admins only — discount and void. CSV export and per-row PDF. |
+| **Invoices** | Click the status pill to settle or re-open. Expand a row for the money breakdown, item add/remove, wallet settlement and — admins only — discount and void. CSV export, and per-row **Print** and **PDF**. |
 | **Products / Loyalty** | The catalogue, top-up packages and membership tiers. |
 | **Customers** | Tier, visits, lifetime spend and balance; top up from a package or a custom amount, browse the wallet ledger, and (admins) correct a balance by hand. |
 | **Bookings** | Upcoming reservations; Arrived turns one into a live session. |
 | **Shifts** | Live totals split by method, a Drawer panel showing the expected-cash arithmetic line by line, cash in/out and close. |
 | **Analytics** | Income and hours charts, gross-profit tiles, utilization bars, a 7 × 24 peak-hours heatmap, and the top station and customer rankings. |
-| **Summary** *(admin)* | The two summary sheets. **Daily**: takings by device type, the money out of the drawer with the reason each was recorded under, how the day's money arrived (cash / phone / wallet) and what is still unpaid. **Monthly**: every day of the month with sessions, hours, income, expenses and net, plus the device breakdown for the month. Tables, not charts — a sheet you settle up against. |
+| **Summary** *(admin)* | The two summary sheets. **Daily**: takings by device type, the day's expenses and where they went by category, the drawer's own movements alongside, how the money arrived (cash / phone / wallet) and what is still unpaid. **Monthly**: every day of the month with sessions, hours, income, expenses and net, plus the device and category breakdowns. Tables, not charts — a sheet you settle up against. |
 | **Logs / Staff / Settings / Cafes** | The activity log, accounts, billing rules with a worked example under each control, and cafe onboarding. **Edit** on a cafe card opens its details and its accounts together — rename it, change its contact email, change an account's email or password, switch a role, add an account or remove one. |
 | **Check-in** *(public)* | Phone-shaped. Controller picker showing the effective rate as it changes. If a session is already running it shows the clock and cost — and deliberately **no stop button**. |
 
@@ -119,6 +119,12 @@ number**: it arrives as a string and is only turned into digits for display,
 because a float cannot hold every 2dp value. **Timestamps get a `Z` appended
 before parsing**: the API sends naive UTC, and without it the browser would
 read every time as local and be wrong by the viewer's offset.
+
+**Printing is not the PDF.** The PDF is a file you keep or email; the receipt
+goes straight to the printer beside the till while the customer is standing
+there, laid out for an 80mm roll and falling back sanely on A4. It prints from a
+hidden iframe rather than a popup, because a popup is the thing browsers block
+and being blocked at the counter is worse than useless.
 
 There is no routing library. Every published version of the obvious one
 currently carries open advisories — none of which apply to a client-only SPA,
@@ -147,6 +153,12 @@ Three things worth knowing about how this is enforced:
   guards the *route* by the same rules, because a path survives a sign-out and
   can be bookmarked or typed. Without that, a staff member landing on an admin
   path renders the screen and gets a wall of 403s instead of a plain answer.
+
+  One function, `navAllows`, answers "may this account see this item" for both
+  the sidebar and the router, so the two can never disagree about who is
+  allowed where. It reads three flags on each nav entry: `superadminOnly`,
+  `adminOnly` and `feature`. The first two are not interchangeable — `isAdmin`
+  is true for the platform owner as well.
 - **A cafe's own admin cannot grant themselves a module.** The switch is
   superadmin-only, and the grant lives in its own `cafe_features` table rather
   than in `app_settings`, which a cafe admin can write to. Otherwise an admin
@@ -262,14 +274,14 @@ off under `prefers-reduced-motion`.
 php artisan test
 ```
 
-**262 feature tests, all green.** They hit real HTTP routes, each against a
+**289 feature tests, all green.** They hit real HTTP routes, each against a
 fresh throwaway database (SQLite in memory, so the suite runs in ~5 seconds
 without a MySQL server). The migrations are written to compile identically on
 both; the MySQL DDL is what the schema section below describes.
 
 | Group | Tests |
 | --- | --- |
-| Billing | 39 |
+| Billing | 46 |
 | Tenancy | 27 |
 | Security | 20 |
 | Cafe management, staff, settings | 28 |
@@ -321,7 +333,18 @@ station takes is a **400** that names the limit.
 
 The rate is **snapshotted onto the session** (`hourly_rate_snapshot`,
 `base_rate_snapshot`, `controllers`), so a later price change never alters a
-session already running or an invoice already issued.
+session already running or an invoice already issued. That snapshot — not the
+station's headline rate — is what an occupied tile on the floor shows, because
+the two differ the moment somebody picks up a second pad.
+
+`GET /sessions/{id}/quote` runs this whole pipeline **without writing
+anything**, which is what the End-session dialog reads. Quote and checkout go
+through one private `price()` method, so the figure the operator reads out at
+the counter is the figure that gets charged — agreeing by construction rather
+than by two code paths happening to do the same arithmetic. The quote is
+itemised (billed time and the block it was rounded to, gross, the rounding
+adjustment and the step it used, any tier discount) so the operator can say
+*why*, not just assert a total.
 `extra_controller_rate_snapshot` is still written — what each pad past the first
 worked out at — but nothing bills from it; it is there so rows written under the
 old flat model stay comparable.
